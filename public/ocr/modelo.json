@@ -1,0 +1,6 @@
+{
+  "language": "spa",
+  "source": "https://tessdata.projectnaptha.com/4.0.0/spa.traineddata.gz",
+  "sha256": "6cd52c545bceeacb2e43fad64fc0703a711c482ba20d1ca4b6915c09de9973e6",
+  "license": "Apache-2.0"
+}

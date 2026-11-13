@@ -1,0 +1,79 @@
+name: Compilar ContaEZ
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with: { targets: x86_64-pc-windows-msvc }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: './src-tauri -> target' }
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx tauri icon src-tauri/icons/icon.svg --output src-tauri/icons
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib -- --skip system_key_store_can_protect_and_remove_a_temporary_secret
+      - run: npx tauri build --ci --target x86_64-pc-windows-msvc --bundles nsis -- --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ContaEZ-windows-x64-sin-firma
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+  macos-arm64:
+    # macos-15 is a native M1 runner; macos-15-intel is a different label.
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CONTAEZ_RUST_VERSION: 1.100.0
+      CONTAEZ_TEST_KEYCHAIN: '1'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - uses: dtolnay/rust-toolchain@1.100.0
+        with: { targets: aarch64-apple-darwin }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: './src-tauri -> target' }
+      - name: Preparar un Llavero exclusivo de esta prueba
+        shell: bash
+        run: |
+          set -euo pipefail
+          task_keychain="$RUNNER_TEMP/contaez-test.keychain-db"
+          task_password="$(uuidgen)"
+          echo "::add-mask::$task_password"
+          security create-keychain -p "$task_password" "$task_keychain"
+          security set-keychain-settings -lut 3600 "$task_keychain"
+          security unlock-keychain -p "$task_password" "$task_keychain"
+          security default-keychain -d user -s "$task_keychain"
+          security list-keychains -d user -s "$task_keychain"
+          echo "CONTAEZ_CI_KEYCHAIN=$task_keychain" >> "$GITHUB_ENV"
+      - name: Probar y compilar app y DMG ARM64
+        run: |
+          bash -n scripts/build-macos.sh scripts/build-macos.command
+          bash scripts/build-macos.sh
+      - name: Eliminar el Llavero temporal
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${CONTAEZ_CI_KEYCHAIN:-}" ]]; then
+            security delete-keychain "$CONTAEZ_CI_KEYCHAIN"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ContaEZ-macos-arm64-adhoc-no-notarizada
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/ContaEZ-macos-arm64.app.zip
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/SHA256SUMS.txt
+            src-tauri/target/aarch64-apple-darwin/release/bundle/BUILD-INFO.txt
+          if-no-files-found: error

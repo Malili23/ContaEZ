@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es-MX"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>ContaEZ para Excel</title><script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script></head>
+<body><main>
+  <header><span class="mark">C✓</span><div><h1>ContaEZ</h1><p>Tu mismo Excel, conectado.</p></div></header>
+  <p class="notice">Solo contabilidad mexicana, dentro del alcance admitido. Gratis y sin IA obligatoria.</p>
+  <div class="practice-intro"><span class="eyebrow">PARA TU PRÁCTICA</span><h2>Sube tu archivo.<br/>Revisa y descarga la copia.</h2><p>Se corrigen fórmulas y se conectan las hojas que puedan identificarse. Se conserva la estructura de tu libro.</p></div>
+  <section class="practice-upload" aria-label="Corregir mi práctica">
+    <label class="file-label" for="practice-file"><span class="file-symbol" aria-hidden="true">▤</span><strong>Elige tu práctica de Excel</strong><span>Archivo .xlsx · Hasta 50 MB</span></label>
+    <input id="practice-file" type="file" accept=".xlsx"/>
+    <p id="practice-file-name" class="file-caption">Elige una copia guardada de tu archivo, aunque ya esté abierto en Excel.</p>
+    <button id="practice-review" disabled>Revisar y conectar mi Excel</button>
+    <p class="safe-note">Tu original sigue intacto. No se extraen sus operaciones a una contabilidad nueva.</p>
+  </section>
+  <div id="practice-status" class="status" role="status" aria-live="polite" hidden></div>
+  <section id="practice-result" hidden aria-label="Resultado de la revisión">
+    <h2>Tu copia revisada</h2><p id="practice-summary"></p>
+    <button id="practice-download">Descargar Excel revisado</button><button id="practice-open" class="secondary" disabled>Abrir copia en Excel</button>
+    <p class="safe-note">La hoja Revisión ContaEZ explica los cambios y pendientes. Abre la copia para recalcular sus fórmulas.</p>
+    <div id="practice-questions"></div>
+    <details class="result-details"><summary>Ver qué cambió</summary><div id="practice-changes"></div></details>
+    <details class="result-details"><summary>Ver observaciones pendientes</summary><div id="practice-pending"></div></details>
+  </section>
+  <details class="how-details"><summary>¿Cómo funciona?</summary><ol><li><strong>Sube el .xlsx.</strong> No necesitas crear una empresa ni recapturar sus movimientos.</li><li><strong>Revisa y aclara.</strong> Se aplican cambios comprobables. Si falta una referencia, se pide el dato concreto.</li><li><strong>Descarga tu misma práctica.</strong> Sus hojas, datos y presentación se conservan en una copia.</li></ol><p>Un archivo sin cambios automáticos puede seguir teniendo pendientes. La revisión no certifica que toda la práctica sea correcta. Esta vista conserva el archivo solo durante la sesión; descarga la copia antes de cerrar.</p></details>
+  <details class="professional-tools"><summary>Herramientas para registros contables</summary>
+    <p>Estas herramientas crean un proyecto y reportes nuevos desde una tabla. Para corregir tu práctica sobre su mismo Excel, utiliza el recuadro de arriba.</p>
+    <div id="host-status" class="status">Comprobando la conexión con Excel…</div>
+    <section><h2>Revisar una selección</h2><p>Selecciona las celdas de tu libro. Se revisarán fórmulas, errores y referencias dentro de esa selección.</p><button id="review">Revisar selección</button><div id="audit" aria-live="polite"></div></section>
+    <section><h2>Generar reportes de una tabla</h2><label>Modalidad<select id="mode"><option value="business">Empresa comercial</option><option value="individual">Persona física</option></select></label><label>Periodo<input id="period" type="month" value="2026-01"/></label><p>Selecciona una tabla con encabezados <b>Fecha, Tipo, Descripción, Importe, IVA, Medio</b>. También admite Producto, Cantidad y Costo unitario. Importe representa la base antes de IVA; IVA es la tasa (por ejemplo 16%).</p><button id="import">Leer tabla seleccionada</button><button id="demo" class="secondary">Cargar un ejemplo</button><div id="preview"></div><label class="check"><input id="confirm" type="checkbox"/> Revisé los datos y confirmo su interpretación.</label><button id="export" disabled>Crear una copia con reportes</button></section>
+    <section><h2>Continuar con información</h2><p>Agrega aclaraciones al proyecto sin pagar IA.</p><textarea id="message" rows="3" placeholder="El periodo correcto es enero de 2026"></textarea><button id="chat" class="secondary">Preparar cambio</button><div id="proposal"></div><button id="apply" hidden>Confirmar cambio</button><button id="chatgpt" class="text-button">Copiar consulta y abrir ChatGPT ↗</button></section>
+  </details>
+  <footer>Creada por <a href="https://www.instagram.com/betcover_ii/" target="_blank" rel="noopener">@betcover_ii</a><br/><a href="mailto:gallardoquirozd4@gmail.com">gallardoquirozd4@gmail.com</a></footer>
+</main><script type="module" src="./main.ts"></script></body></html>
