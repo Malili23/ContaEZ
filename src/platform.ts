@@ -52,12 +52,22 @@ async function migrateLegacy(db: IDBDatabase): Promise<void> {
     let legacy: unknown;
     try { legacy=JSON.parse(raw); } catch { throw new Error('El almacenamiento anterior está dañado. Se conservó intacto para recuperación.'); }
     if (!Array.isArray(legacy)) throw new Error('El almacenamiento anterior no tiene un formato válido. Se conservó intacto.');
-    const projects=legacy.filter(validProject); const existing=await readAll(db); const merged=new Map(existing.map(p=>[p.id,p]));
-    for(const project of projects){const prior=merged.get(project.id);if(!prior||String(project.updatedAt||'')>String(prior.updatedAt||''))merged.set(project.id,project);}
+    const projects=legacy.filter(validProject);
     await new Promise<void>((resolve,reject)=>{
       const transaction=db.transaction('projects','readwrite');
       transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(new Error('No se pudo migrar el almacenamiento. El respaldo anterior sigue intacto.'));transaction.onabort=transaction.onerror;
-      for(const project of merged.values())transaction.objectStore('projects').put(project);
+      const store=transaction.objectStore('projects');
+      const existing=store.getAll();
+      existing.onsuccess=()=>{
+        const newest=new Map(existing.result.filter(validProject).map(project=>[project.id,project.updatedAt]));
+        for(const project of projects){
+          const updatedAt=newest.get(project.id);
+          if(!newest.has(project.id)||String(project.updatedAt||'')>String(updatedAt||'')){
+            store.put(project);
+            newest.set(project.id,project.updatedAt);
+          }
+        }
+      };
     });
     try{if(projects.length===legacy.length&&legacyStorage.getItem(BROWSER_KEY)===raw)legacyStorage.removeItem(BROWSER_KEY);}catch{/* The completed IndexedDB migration remains usable; the legacy copy is retained. */}
   })();
@@ -85,6 +95,8 @@ export function storageDescription(): string {
   return isDesktop() ? 'Datos cifrados en tu equipo y protegidos por el sistema.' : 'Vista web: guardado en este navegador. Conserva un respaldo de tus proyectos.';
 }
 export async function loadProjects(): Promise<Project[]> {
+  // A workspace can remount while an edit from the previous screen is still writing.
+  if(mutations.size)await Promise.allSettled(mutations.values());
   if (isDesktop()) return (await native<Project[]>('projects_load')).sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
   const db=await database();await migrateLegacy(db);
   return (await readAll(db)).sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));

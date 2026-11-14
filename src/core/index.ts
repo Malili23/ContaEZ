@@ -25,7 +25,7 @@ export function parseProject(raw:unknown):Project {
   const operationShape=(o:unknown):boolean=>object(o)&&['id','date','type','description','amount','vatRate','paymentMethod'].every(k=>typeof o[k]==='string')&&operationTypes.includes(String(o.type))&&['cash','bank','credit'].includes(String(o.paymentMethod))&&stringArray(o.sourceIds)&&typeof o.confirmed==='boolean'&&['accountCode','counterpartyCode','productId','quantity','unitCost','relatedOperationId','invoiceId','openingOutstandingBase'].every(k=>o[k]===undefined||typeof o[k]==='string')&&['taxDeductible','referenceOnly'].every(k=>o[k]===undefined||typeof o[k]==='boolean');
   for(const o of raw.operations as unknown[])if(!operationShape(o))throw invalid();
   for(const e of raw.manualEntries as unknown[]){if(!object(e)||!['id','date','concept','kind'].every(k=>typeof e[k]==='string')||!['opening','income','expense','diary','adjustment'].includes(String(e.kind))||!Array.isArray(e.lines)||!stringArray(e.sourceIds))throw invalid();for(const l of e.lines)if(!object(l)||!['id','accountCode','debit','credit'].every(k=>typeof l[k]==='string'))throw invalid();}
-  for(const d of raw.documents as unknown[])if(!object(d)||!['id','name','mime','hash','importedAt','status'].every(k=>typeof d[k]==='string')||!['pending','confirmed','duplicate'].includes(String(d.status))||(d.contentBase64!==undefined&&typeof d.contentBase64!=='string'))throw invalid();
+  for(const d of raw.documents as unknown[])if(!object(d)||!['id','name','mime','hash','importedAt','status'].every(k=>typeof d[k]==='string')||!['pending','confirmed','duplicate'].includes(String(d.status))||(d.uuid!==undefined&&typeof d.uuid!=='string')||(d.contentBase64!==undefined&&typeof d.contentBase64!=='string'))throw invalid();
   for(const lot of raw.inventoryInitial as unknown[])if(!object(lot)||!['id','productId','date','quantity','unitCost'].every(k=>typeof lot[k]==='string'))throw invalid();
   for(const b of raw.bankTransactions as unknown[])if(!object(b)||!['id','date','description','amount'].every(k=>typeof b[k]==='string'))throw invalid();
   for(const a of raw.assets as unknown[])if(!object(a)||!['id','name','type','cost','residual','startDate','accountCode','expenseAccountCode'].every(k=>typeof a[k]==='string')||!['depreciation','amortization'].includes(String(a.type))||typeof a.usefulLifeMonths!=='number')throw invalid();
@@ -61,7 +61,7 @@ export function restoreRevision(project:Project,id:string):Project {
 }
 export function closeProject(project:Project):Project {
   const result=processProject(project);
-  const pendingCodes=new Set(['OPERATION_PENDING','DOCUMENT_PENDING','ENTRY_SOURCE_PENDING','BANK_STATEMENT','BANK_UNMATCHED','BANK_DIFFERENCE','BANK_MATCH_MISMATCH']);
+  const pendingCodes=new Set(['OPERATION_PENDING','DOCUMENT_PENDING','ENTRY_SOURCE_PENDING','OPERATION_SOURCE_PENDING','BANK_STATEMENT','BANK_UNMATCHED','BANK_DIFFERENCE','BANK_MATCH_MISMATCH']);
   if(result.issues.some(i=>i.severity==='error'||pendingCodes.has(i.code))||!project.taxConfig.openingBalancesConfirmed)throw new Error('Resolver incidencias, documentos/operaciones pendientes y conciliación; confirmar saldos iniciales antes de cerrar.');
   if(project.mode!=='student'&&!project.rfc.trim())throw new Error('Capturar y confirmar el RFC antes de cerrar el proyecto profesional.');
   if(project.mode!=='student'&&result.taxes.status==='incomplete')throw new Error('Completar los datos del papel de trabajo fiscal antes de cerrar este proyecto profesional.');

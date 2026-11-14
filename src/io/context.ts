@@ -1,4 +1,4 @@
-import { cellParts, columnName, escapeXml, readRawWorkbook, updateCellFormula, appendReviewSheet, writeRawWorkbook, type RawBook, type RawCell, type RawSheet } from './workbook';
+import { cellParts, columnName, cellCanReceiveFormula, escapeXml, readRawWorkbook, updateCellFormula, appendReviewSheet, writeRawWorkbook, type RawBook, type RawCell, type RawSheet } from './workbook';
 
 export interface PracticeContextReference { name:string; data:Uint8Array; text?:string; }
 export interface ContextSuggestion { id:string; title:string; explanation:string; source:string; targetSheet:string; targetCell:string; formula:string; originalFormula?:string; originalValue?:string; layoutFingerprint:string; }
@@ -100,7 +100,9 @@ export function inspectPracticeContext(practice:Uint8Array,references:PracticeCo
     let model:RawBook;try{model=readRawWorkbook(reference.data);}catch{notes.push(`${reference.name}: no se pudo leer como un modelo Excel válido.`);continue;}
     for(const target of focusedCells){const sheet=book.sheets.find(s=>s.name===target.sheet)!,cell=sheet.cells.get(target.cell),modelSheet=model.sheets.find(s=>s.name===target.sheet),modelCell=modelSheet?.cells.get(target.cell);
       if(!blank(cell)&&cell?.formula===undefined){notes.push(`${reference.name}: ${target.sheet}!${target.cell} contiene un dato capturado; se conserva.`);continue;}
+      if (!cellCanReceiveFormula(sheet, target.cell)) {notes.push(`${reference.name}: ${target.sheet}!${target.cell} forma parte de un bloque combinado, matricial o de tabla de datos. Elige una celda que se pueda editar por separado.`);continue;}
       if(!modelSheet||!modelCell?.formula){notes.push(`${reference.name}: no hay una fórmula modelo en ${target.sheet}!${target.cell}.`);continue;}
+      if (!cellCanReceiveFormula(modelSheet, target.cell)) {notes.push(`${reference.name}: la fórmula de ${target.sheet}!${target.cell} pertenece a un bloque gestionado en conjunto por Excel.`);continue;}
       if(modelCell.formula===cell?.formula)continue;
       if(!compatible(book,model,sheet,modelSheet,target.cell)){notes.push(`${reference.name}: no coincide el diseño o las etiquetas cercanas de ${target.sheet}!${target.cell}; no se propone copiar su fórmula.`);continue;}
       try{if(errorValue.test(modelCell.value))throw new Error('El modelo guarda un error en esa celda.');validFormula(model,target.sheet,target.cell,modelCell.formula,false);validFormula(book,target.sheet,target.cell,modelCell.formula);}
@@ -126,6 +128,7 @@ function writeFormula(sheet:RawSheet,address:string,formula:string){
 }
 export function applyPracticeContextSuggestion(data:Uint8Array,suggestion:ContextSuggestion):Uint8Array{
   const book=readRawWorkbook(data),sheet=book.sheets.find(s=>s.name===suggestion.targetSheet);if(!sheet||!/^([A-Z]{1,3})([1-9]\d*)$/.test(suggestion.targetCell))throw new Error('La celda propuesta ya no existe en este libro.');
+  if (!cellCanReceiveFormula(sheet, suggestion.targetCell)) throw new Error('La celda pertenece a un bloque combinado, matricial o de tabla de datos. Vuelve a revisar el contexto.');
   const current=sheet.cells.get(suggestion.targetCell);if(current?.formula!==suggestion.originalFormula||(current?.value??'')!==(suggestion.originalValue??'')||layout(book,sheet,suggestion.targetCell)!==suggestion.layoutFingerprint)throw new Error('La práctica cambió desde la propuesta. Vuelve a revisar el contexto antes de aplicar.');
   if(!blank(current)&&current?.formula===undefined)throw new Error('Se conserva el dato capturado; esta propuesta no puede sobrescribirlo.');validFormula(book,sheet.name,suggestion.targetCell,suggestion.formula);
   writeFormula(sheet,suggestion.targetCell,suggestion.formula);

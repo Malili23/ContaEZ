@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDownLeft, ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Banknote, BookOpen, Building2, CalendarDays, Check, CheckCheck, ChevronDown, ChevronRight, CircleHelp, ClipboardList, Download, FileCheck2, FileSpreadsheet, Files, FolderOpen, GraduationCap, History, Landmark, Layers3, ListChecks, LoaderCircle, LockKeyhole, MessageSquareText, MoreHorizontal, Package, Plus, PencilLine, RefreshCw, Search, Send, Settings2, ShieldCheck, Sparkles, Trash2, Upload, UserRound, Wallet, X } from 'lucide-react';
 import Decimal from 'decimal.js';
+import { version as appVersion } from '../package.json';
 import type { Account, ChatMessage, ChatProposal, FixedAsset, Issue, JournalEntry, Mode, Operation, OperationType, ProcessingResult, Project, SourceDocument } from './core/types';
 import { applyChatProposal, closeProject, createProject, createRevision, makeDemoProject, newId, parseProject, processProject, proposeChat, reopenProject, restoreRevision } from './core';
 import { auditWorkbook, exportWorkbook, importFile, repairWorkbook, type WorkbookAudit } from './io';
-import { backupProject, deleteProject, exportBytes, loadProjects, openExternal, saveProject, storageDescription } from './platform';
+import { backupProject, deleteProject, exportBytes, isDesktop, loadProjects, openExternal, saveProject, storageDescription } from './platform';
 import { askChatGPT, connectChatGPT, disconnectChatGPT, getChatGPTStatus } from './desktop/ai';
 import { exportToGoogleSheets } from './desktop/google';
 import StudentWorkspace from './StudentWorkspace';
@@ -16,6 +17,25 @@ const MODES: Record<Mode, { label: string; title: string; description: string; i
   individual: { label: 'Persona física', title: 'Menos pendientes, más claridad', description: 'Organiza cobros, pagos y papeles de trabajo de tu actividad.', icon: UserRound, tag: 'Actividad empresarial · 612' },
 };
 type Page = 'overview'|'documents'|'operations'|'inventory'|'review'|'reports'|'chat'|'rules'|'settings';
+type ProfessionalMode = Exclude<Mode, 'student'>;
+type SaveState = 'saving'|'saved'|'failed';
+const PROFESSIONAL_MODES: ProfessionalMode[] = ['business','individual'];
+const eligiblePeriod = (value: string) => /^202[56]-(?:0[1-9]|1[0-2])$/.test(value);
+const validCalendarDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+  !Number.isNaN(Date.parse(value+'T00:00:00Z')) && new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
+const normalizeRate = (value:string) => {
+  try{return new Decimal(value).toString();}catch{return value;}
+};
+const backupFile = (file: File) => /\.(contaez|json)$/i.test(file.name);
+function rememberedGoogleClient(): string {
+  try { return localStorage.getItem('contaez-google-client') || ''; } catch { return ''; }
+}
+function rememberGoogleClient(value: string) {
+  try {
+    if (/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value.trim())) localStorage.setItem('contaez-google-client',value.trim());
+    else localStorage.removeItem('contaez-google-client');
+  } catch { /* Credentials can still be entered and used for this session. */ }
+}
 const NAV: { id: Page; label: string; icon: typeof Wallet }[] = [
   {id:'overview',label:'Resumen',icon:Wallet},{id:'documents',label:'Documentos',icon:Files},{id:'operations',label:'Movimientos',icon:ArrowDownLeft},{id:'inventory',label:'Inventario y activos',icon:Package},{id:'review',label:'Revisión',icon:ListChecks},{id:'reports',label:'Reportes',icon:FileSpreadsheet},{id:'chat',label:'Asistente',icon:MessageSquareText},
 ];
@@ -27,34 +47,104 @@ const positive=(v:string)=>{try{return new Decimal(v||0).gte(0)}catch{return fal
 const bytesBase64=(bytes:Uint8Array)=>{let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(s);};
 const base64Bytes=(s:string)=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
 
-function AccountingWorkspace({initialMode,onBack}:{initialMode:'business'|'individual';onBack:()=>void}){
+function AccountingWorkspace({initialMode,onBack}:{initialMode:ProfessionalMode;onBack:()=>void}){
   const [projects,setProjects]=useState<Project[]>([]),[activeId,setActiveId]=useState(''),[loaded,setLoaded]=useState(false),[page,setPage]=useState<Page>('overview');
-  const [modal,setModal]=useState<null|'new'|'operation'|'opening'|'adjustment'|'account'|'asset'|'lot'|'history'>(null),[newMode,setNewMode]=useState<Mode>(initialMode),[newName,setNewName]=useState(''),[newPeriod,setNewPeriod]=useState('2026-01');
-  const [busy,setBusy]=useState(''),[toast,setToast]=useState<{text:string;error?:boolean}|null>(null),[saved,setSaved]=useState(false),[search,setSearch]=useState('');
+  const [modal,setModal]=useState<null|'new'|'operation'|'opening'|'adjustment'|'account'|'asset'|'lot'|'history'>(null),[newMode,setNewMode]=useState<ProfessionalMode>(initialMode),[newName,setNewName]=useState(''),[newPeriod,setNewPeriod]=useState('2026-01');
+  const [busy,setBusy]=useState(''),[toast,setToast]=useState<{text:string;error?:boolean}|null>(null),[saveStates,setSaveStates]=useState<Record<string,SaveState>>({}),[search,setSearch]=useState('');
   const [editingOperation,setEditingOperation]=useState<Operation|null>(null);
   const [audits,setAudits]=useState<Record<string,WorkbookAudit>>({}),[selectedReport,setSelectedReport]=useState('Balanza'),[chatText,setChatText]=useState(''),[aiQuestion,setAiQuestion]=useState(''),[aiAnswer,setAiAnswer]=useState('');
   const [ai,setAi]=useState<{connected:boolean;email?:string;model?:string}>({connected:false});
-  const [googleId,setGoogleId]=useState(()=>localStorage.getItem('contaez-google-client')||'');
-  const uploadRef=useRef<HTMLInputElement>(null),chatEnd=useRef<HTMLDivElement>(null),savingVersion=useRef(0);
+  const [googleId,setGoogleId]=useState(rememberedGoogleClient);
+  const uploadRef=useRef<HTMLInputElement>(null),chatEnd=useRef<HTMLDivElement>(null),backupRef=useRef<HTMLInputElement>(null);
+  const writing=useRef(new Map<string,Project>()),operationBusy=useRef(false);
   const project=projects.find(p=>p.id===activeId);
   const result=useMemo<ProcessingResult|null>(()=>project?processProject(project):null,[project]);
   const errors=result?.issues.filter(i=>i.severity==='error').length||0;
   const notices=result?.issues.filter(i=>i.severity==='warning').length||0;
   const flash=(text:string,error=false)=>setToast({text,error});
-  useEffect(()=>{loadProjects().then(p=>{const checked:Project[]=[];let failed=0;for(const raw of p.filter(item=>item.mode===initialMode)){try{checked.push(parseProject(raw));}catch{failed++;}}setProjects(checked);setActiveId(checked[0]?.id||'');if(failed)flash(`${failed} proyectos tienen un formato no compatible y no se modificaron.`,true);}).catch(e=>flash('No se pudieron abrir los proyectos: '+String(e),true)).finally(()=>setLoaded(true));getChatGPTStatus().then(setAi).catch(()=>{});},[]);
-  useEffect(()=>{if(!project||!loaded)return; const v=++savingVersion.current;setSaved(false);const timer=setTimeout(()=>{saveProject(project).then(()=>{if(v===savingVersion.current)setSaved(true)}).catch(e=>flash('No se pudo guardar. Descarga un respaldo: '+String(e),true));},400);return()=>clearTimeout(timer);},[project,loaded]);
+  useEffect(()=>{
+    let active=true;
+    loadProjects().then(all=>{
+      if(!active)return;
+      const checked:Project[]=[];
+      let failed=0;
+      for(const raw of all.filter(item=>item.mode==='business'||item.mode==='individual')){
+        try{checked.push(parseProject(raw));}catch{failed++;}
+      }
+      setProjects(checked);
+      setActiveId(checked.find(item=>item.mode===initialMode)?.id||'');
+      if(failed)flash(`${failed} proyectos tienen un formato no compatible.`,true);
+    }).catch(error=>{if(active)flash('No se pudieron abrir los proyectos: '+String(error),true);})
+      .finally(()=>{if(active)setLoaded(true);});
+    getChatGPTStatus().then(status=>{if(active)setAi(status);}).catch(()=>{});
+    return()=>{active=false;};
+  },[initialMode]);
   useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),6500);return()=>clearTimeout(t);},[toast]);
   useEffect(()=>{chatEnd.current?.scrollIntoView({behavior:'smooth',block:'nearest'});},[project?.chat.length]);
-  const change=(next:Project)=>{setProjects(prev=>prev.map(p=>p.id===next.id?{...next,updatedAt:new Date().toISOString()}:p));};
+  const persist=(next:Project)=>{
+    writing.current.set(next.id,next);
+    setSaveStates(old=>({...old,[next.id]:'saving'}));
+    return saveProject(next).then(()=>{
+      if(writing.current.get(next.id)!==next)return;
+      writing.current.delete(next.id);
+      setSaveStates(old=>({...old,[next.id]:'saved'}));
+    },error=>{
+      if(writing.current.get(next.id)!==next)return;
+      writing.current.delete(next.id);
+      setSaveStates(old=>({...old,[next.id]:'failed'}));
+      flash('No se pudo guardar «'+next.name+'». Reintenta o descarga un respaldo. '+String(error),true);
+    });
+  };
+  const change=(next:Project)=>{
+    const updated={...next,updatedAt:new Date().toISOString()};
+    setProjects(prev=>prev.map(p=>p.id===updated.id?updated:p));
+    void persist(updated);
+  };
   const edit=(fn:(p:Project)=>Project,label?:string)=>{if(!project)return;if(project.closed){flash('Reabre el periodo desde Configuración para hacer cambios.',true);return;}const p=label?createRevision(project,label):project;change(fn(p));};
-  const run=async(label:string,fn:()=>Promise<void>)=>{setBusy(label);try{await fn()}catch(e){flash(e instanceof Error?e.message:String(e),true)}finally{setBusy('')}};
-  const addProject=(p:Project)=>{setProjects(prev=>[p,...prev]);setActiveId(p.id);setPage('overview');setModal(null);saveProject(p).catch(e=>flash(String(e),true));};
-  const handleCreate=()=>{if(!newName.trim())return;addProject(createProject(newMode,newName.trim(),newPeriod));flash('Proyecto creado. Empieza con tu apertura o importa documentos.');};
-  const importFiles=async(files:FileList|File[])=>{if(!project||!files.length)return;if(project.closed){flash('Reabre el periodo para importar.',true);return;}await run('Leyendo documentos',async()=>{
-    let next=createRevision(project,'Antes de importar documentos');let count=0;let warnings:string[]=[];
-    for(const file of Array.from(files)){
+  const run=async(label:string,fn:()=>Promise<void>)=>{
+    if(operationBusy.current)return;
+    operationBusy.current=true;
+    setBusy(label);
+    try{await fn();}catch(error){flash(error instanceof Error?error.message:String(error),true);}
+    finally{operationBusy.current=false;setBusy('');}
+  };
+  const selectProject=(id:string)=>{
+    setActiveId(id);setPage('overview');setModal(null);setEditingOperation(null);
+    setSearch('');setChatText('');setAiQuestion('');setAiAnswer('');
+  };
+  const addProject=async(p:Project)=>{
+    await saveProject(p);
+    setProjects(prev=>[p,...prev]);
+    selectProject(p.id);
+  };
+  const handleCreate=()=>{
+    if(!newName.trim()||!eligiblePeriod(newPeriod))return;
+    return run('Creando proyecto',async()=>{
+      await addProject(createProject(newMode,newName.trim(),newPeriod));
+      flash('Proyecto creado. Empieza con tu apertura o importa documentos.');
+    });
+  };
+  const importFiles=async(files:FileList|File[])=>{
+    const selectedFiles=Array.from(files);
+    if(!selectedFiles.length)return;
+    if(selectedFiles.some(backupFile)){
+      if(selectedFiles.length!==1){flash('Selecciona un respaldo por separado para abrirlo como proyecto.',true);return;}
+      await run('Restaurando respaldo',async()=>{
+        const data=JSON.parse(await selectedFiles[0].text());
+        const candidate=parseProject(data?.project??data);
+        if(candidate.mode==='student')throw new Error('Abre este respaldo desde Corregir una práctica Excel.');
+        const name=candidate.name+' · respaldo';
+        await addProject({...candidate,id:newId(),name,updatedAt:new Date().toISOString()});
+        flash('Respaldo restaurado como un proyecto independiente.');
+      });
+      return;
+    }
+    if(!project)return;
+    if(project.closed){flash('Reabre el periodo para importar.',true);return;}
+    await run('Leyendo documentos',async()=>{
+    let next=createRevision(project,'Antes de importar documentos');let count=0;const warnings:string[]=[];
+    for(const file of selectedFiles){
       try{
-        if(/\.(contaez|json)$/i.test(file.name)){const data=JSON.parse(await file.text());const candidate=parseProject(data.project||data);addProject({...candidate,id:newId(),closed:false,name:candidate.name+' · respaldo'});return;}
         const imported=await importFile(file,next);
         for(const d of imported.documents){d.reviewNotes=imported.issues.map(i=>i.title+': '+i.detail+' '+i.suggestion);if(d.status!=='duplicate'){(d as SourceDocument&{contentBase64?:string}).contentBase64=bytesBase64(new Uint8Array(await file.arrayBuffer()));}}
         next={...next,documents:[...next.documents,...imported.documents],operations:[...next.operations,...imported.operations],manualEntries:[...next.manualEntries,...imported.entries],bankTransactions:[...next.bankTransactions,...imported.bankTransactions]};
@@ -62,8 +152,9 @@ function AccountingWorkspace({initialMode,onBack}:{initialMode:'business'|'indiv
         if(imported.issues.length)warnings.push(imported.issues[0].title);count++;
       }catch(e){warnings.push(file.name+': '+(e instanceof Error?e.message:String(e)));}
     }
-    change(next);setPage('documents');flash(`${count} documento${count===1?'':'s'} importado${count===1?'':'s'}. ${warnings.length?'Revisa las observaciones y confirma los datos.':'Confirma los movimientos antes de procesarlos.'}`,count===0);
-    if(warnings.length)console.info('Observaciones de importación',warnings);
+    if(count)change(next);
+    setPage('documents');
+    flash(`${count} archivo${count===1?'':'s'} procesado${count===1?'':'s'}. ${warnings.length?warnings.join(' · '):'Confirma los movimientos antes de procesarlos.'}`,count===0);
   });};
   const exportExcel=()=>run('Preparando Excel vinculado',async()=>{if(!project||!result)return;const data=await exportWorkbook(project,result);await exportBytes(data,project.name.replace(/[^\p{L}\p{N}\s_-]/gu,'').trim()+'__ContaEZ.xlsx');flash('Excel generado con fórmulas vinculadas y pendientes visibles.');});
   const submitChat=()=>{if(!project||!chatText.trim())return;const text=chatText.trim();const proposal=proposeChat(project,text);edit(p=>({...p,chat:[...p.chat,{id:newId(),role:'user',text,at:new Date().toISOString()},{id:newId(),role:'assistant',text:proposal.message,at:new Date().toISOString(),proposal}]}));setChatText('');};
@@ -73,23 +164,36 @@ function AccountingWorkspace({initialMode,onBack}:{initialMode:'business'|'indiv
 
   if(!loaded)return <div className="loading-screen"><Brand/><LoaderCircle className="spin"/><p>Abriendo tu espacio contable…</p></div>;
 
+  const saveState=project?(saveStates[project.id]||'saved'):undefined;
+  const goBack=()=>{
+    const saving=projects.find(p=>saveStates[p.id]==='saving');
+    if(saving){flash('Espera a que termine el guardado de «'+saving.name+'».');return;}
+    const failed=projects.find(p=>saveStates[p.id]==='failed');
+    if(failed){
+      flash('Hay cambios sin guardar en «'+failed.name+'». Reintenta o descarga un respaldo antes de salir.',true);
+      selectProject(failed.id);
+      return;
+    }
+    onBack();
+  };
   return <div className="app-shell">
+    <div inert={!!busy||!!modal}>
     <aside className="sidebar">
       <Brand/>
-      <button className="nav-item" onClick={onBack}><ArrowLeft size={18}/>Corregir una práctica Excel</button>
-      <div className="project-switch"><span className="project-avatar">{project?(() => {const ModeIcon=MODES[project.mode].icon;return <ModeIcon size={20}/>})():<FolderOpen size={20}/>}</span><span><small>ESPACIO DE TRABAJO</small>{projects.length?<select aria-label="Proyecto activo" value={activeId} onChange={e=>{setActiveId(e.target.value);setPage('overview');}}>{projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>:<strong>Tu primer proyecto</strong>}</span><button className="icon-button" title="Crear otro proyecto" onClick={()=>{setNewName('');setModal('new')}}><Plus size={16}/></button></div>
+      <button className="nav-item" onClick={goBack}><ArrowLeft size={18}/>Corregir una práctica Excel</button>
+      <div className="project-switch"><span className="project-avatar">{project?(() => {const ModeIcon=MODES[project.mode].icon;return <ModeIcon size={20}/>})():<FolderOpen size={20}/>}</span><span><small>ESPACIO DE TRABAJO</small>{projects.length?<select aria-label="Proyecto activo" value={activeId} onChange={e=>selectProject(e.target.value)}>{!activeId&&<option value="">Elegir proyecto</option>}{PROFESSIONAL_MODES.map(mode=>projects.some(p=>p.mode===mode)&&<optgroup key={mode} label={MODES[mode].label}>{projects.filter(p=>p.mode===mode).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>)}</select>:<strong>Tu primer proyecto</strong>}</span><button className="icon-button" title="Crear otro proyecto" onClick={()=>{setNewMode(project?.mode==='individual'?'individual':project?.mode==='business'?'business':initialMode);setNewName('');setModal('new')}}><Plus size={16}/></button></div>
       <div className="nav-caption">CONTABILIDAD</div>
       <nav>{NAV.map(n=><button key={n.id} className={'nav-item '+(page===n.id?'active':'')} disabled={!project} onClick={()=>setPage(n.id)}><n.icon size={18}/><span>{n.label}</span>{n.id==='review'&&errors>0&&<b className="nav-count">{errors}</b>}{n.id==='chat'&&<span className="new-label">Gratis</span>}</button>)}</nav>
       <div className="sidebar-bottom"><button className={'nav-item '+(page==='rules'?'active':'')} onClick={()=>setPage('rules')}><BookOpen size={18}/>Normativa mexicana</button><button className={'nav-item '+(page==='settings'?'active':'')} onClick={()=>setPage('settings')}><Settings2 size={18}/>Configuración</button><div className="local-note"><ShieldCheck size={17}/><span>Tu información, contigo<small>{storageDescription()}</small></span></div><button className="creator" onClick={()=>openExternal('https://www.instagram.com/betcover_ii/')}><span className="creator-avatar">b.</span><span>Creada por @betcover_ii<small>Hecha para México</small></span><ArrowUpRight size={14}/></button></div>
     </aside>
     <div className="app-body">
-      <header className="topbar"><div className="breadcrumb">Mi espacio <ChevronRight size={14}/><span>{project?NAV.find(n=>n.id===page)?.label|| (page==='rules'?'Normativa':'Configuración'):'Bienvenida'}</span></div><div className="topbar-actions"><span className="mexico-pill"><i/> Solo México</span>{project&&<><span className="save-state"><CheckCheck size={14}/>{saved?'Guardado':'Guardando…'}</span><button className="icon-button" title="Historial de revisiones" onClick={()=>setModal('history')}><History size={18}/></button><button className="button primary compact" onClick={()=>setModal('operation')} disabled={project.closed}><Plus size={16}/>Movimiento</button></>}</div></header>
+      <header className="topbar"><div className="breadcrumb">Mi espacio <ChevronRight size={14}/><span>{project?NAV.find(n=>n.id===page)?.label|| (page==='rules'?'Normativa':'Configuración'):'Bienvenida'}</span></div><div className="topbar-actions"><span className="mexico-pill"><i/> Solo México</span>{project&&<>{saveState==='failed'?<button className="button secondary compact" onClick={()=>void persist(project)} title="Reintentar guardado">Reintentar guardado</button>:<span className="save-state" role="status"><CheckCheck size={14}/>{saveState==='saving'?'Guardando…':'Guardado'}</span>}<button className="icon-button" title="Historial de revisiones" onClick={()=>setModal('history')}><History size={18}/></button><button className="button primary compact" onClick={()=>setModal('operation')} disabled={project.closed}><Plus size={16}/>Movimiento</button></>}</div></header>
       <main>
         {!project&&page!=='rules'&&page!=='settings'?<>
           <div className="welcome"><span className="eyebrow"><span className="tiny-square"/> CONTABILIDAD MEXICANA, SIN COMPLICACIONES</span><h1>Tu contabilidad,<br/><em>en orden.</em></h1><p>Un lugar para entender tus números, resolver tus prácticas<br className="desktop-break"/> y trabajar con confianza. Gratis, desde tu computadora.</p><div className="welcome-proof"><span><Check size={15}/> Sin suscripción obligatoria</span><span><Check size={15}/> Excel vinculado</span><span><Check size={15}/> Datos locales</span></div></div>
           <div className="section-heading"><div><h2>¿Qué vamos a trabajar?</h2><p>Elige una modalidad. Puedes tener varios proyectos.</p></div><span className="text-muted">01 / EMPEZAR</span></div>
-          <div className="mode-grid">{(Object.entries(MODES) as [Mode,typeof MODES.student][]).filter(([mode])=>mode!=='student').map(([mode,m],i)=><button className="mode-card" key={mode} onClick={()=>{setNewMode(mode);setNewName('');setModal('new')}}><div className={'mode-icon mode-'+mode}><m.icon size={27}/></div><span className="mode-tag">{m.tag}</span><h3>{m.label}</h3><p>{m.description}</p><span className="mode-action">Crear proyecto <ArrowRight size={17}/></span><span className="mode-number">0{i+1}</span></button>)}</div>
-          <div className="intro-bottom"><div><span className="round-icon"><Sparkles size={20}/></span><div><h3>Primero explora, después empieza.</h3><p>Prueba un ejemplo con compras, ventas e inventarios. Tus archivos quedan aparte.</p></div></div><button className="button secondary" onClick={()=>addProject(makeDemoProject('business'))}>Explorar un ejemplo <ArrowRight size={16}/></button></div>
+          <div className="mode-grid">{PROFESSIONAL_MODES.map((mode,i)=>{const m=MODES[mode];return <button className="mode-card" key={mode} onClick={()=>{setNewMode(mode);setNewName('');setModal('new')}}><div className={'mode-icon mode-'+mode}><m.icon size={27}/></div><span className="mode-tag">{m.tag}</span><h3>{m.label}</h3><p>{m.description}</p><span className="mode-action">Crear proyecto <ArrowRight size={17}/></span><span className="mode-number">0{i+1}</span></button>;})}</div>
+          <div className="intro-bottom"><div><span className="round-icon"><Sparkles size={20}/></span><div><h3>Explora un ejemplo o restaura un respaldo</h3><p>El ejemplo usa datos ficticios de la modalidad que elegiste.</p></div></div><div className="button-group"><button className="button secondary" onClick={()=>backupRef.current?.click()}><FolderOpen size={16}/>Restaurar respaldo</button><button className="button secondary" onClick={()=>void run('Abriendo ejemplo',()=>addProject(makeDemoProject(initialMode)))}>Explorar un ejemplo <ArrowRight size={16}/></button></div></div>
           <div className="jurisdiction-note"><Landmark size={17}/><p>{DISCLAIMER}</p></div>
         </>:project&&page==='overview'&&result?<>
           <PageTitle eyebrow={MODES[project.mode].label} title={project.name} subtitle="Cada cifra tiene un origen. Cada cambio, una explicación." action={<button className="period-button" onClick={()=>setPage('settings')}><CalendarDays size={17}/>{monthLabel(project.period)}<ChevronDown size={14}/></button>}/>
@@ -125,28 +229,30 @@ function AccountingWorkspace({initialMode,onBack}:{initialMode:'business'|'indiv
             <div className="stats-grid three"><Stat label="IVA cobrado" value={result.taxes.vatCollected} icon={ArrowDownLeft} caption="Según cobros registrados"/><Stat label="IVA pagado" value={result.taxes.vatPaid} icon={ArrowUpRight} caption="Según pagos registrados"/><Stat label="Diferencia de IVA" value={result.taxes.vatDue} icon={Landmark} caption="Consulta retenciones y observaciones"/></div>
             <FinancialStatement title="ISR provisional · papel de trabajo" project={project} rows={[['Ingresos considerados',result.taxes.taxableRevenue],['Deducciones consideradas',result.taxes.deductions],['Base de cálculo',result.taxes.isrBase],['ISR provisional',result.taxes.isr]]}/><section className="panel panel-body"><h3>Datos y alcance del cálculo</h3>{result.taxes.notes.map((n,i)=><p className="small-note" key={i}>{n}</p>)}<button className="button secondary" onClick={()=>setPage('settings')}>Completar datos fiscales <ArrowRight size={15}/></button></section>
           </>:<><FinancialStatement title="Conciliación bancaria" project={project} rows={[['Saldo contable de bancos',result.bankReconciliation.ledgerBalance],['Movimientos de estado de cuenta',result.bankReconciliation.statementBalance],['Diferencia por conciliar',result.bankReconciliation.difference]]}/><div className="small-note">{result.bankReconciliation.unmatchedCount} movimientos sin vincular. Importa tu estado bancario CSV con fecha, descripción e importe. El saldo del extracto se debe revisar con su apertura.</div><section className="panel table-wrap"><table><thead><tr><th>FECHA</th><th>MOVIMIENTO BANCARIO</th><th className="number">IMPORTE</th><th>RELACIONAR CON</th></tr></thead><tbody>{project.bankTransactions.map(b=><tr key={b.id}><td>{dateLabel(b.date)}</td><td>{b.description}</td><td className="number">{currency(b.amount)}</td><td><select aria-label={'Relacionar '+b.description} value={b.matchedOperationId||''} onChange={e=>edit(p=>({...p,bankTransactions:p.bankTransactions.map(x=>x.id===b.id?{...x,matchedOperationId:e.target.value||undefined}:x)}),'Relacionar movimiento bancario')}><option value="">Por relacionar</option>{project.operations.map(o=><option key={o.id} value={o.id}>{o.description} · {currency(o.amount)}</option>)}</select></td></tr>)}</tbody></table></section></>}
-          <div className="export-options"><button className="button secondary" onClick={()=>void run('Creando Google Sheets',async()=>{const url=await exportToGoogleSheets(project,result,googleId);await openExternal(url);flash('Hoja creada en tu cuenta de Google.');})}><FileSpreadsheet size={17}/>Abrir en Google Sheets</button><button className="button secondary" onClick={()=>void run('Guardando respaldo',async()=>{await backupProject(project);flash('Respaldo descargado. Guárdalo en un lugar privado.');})}><FolderOpen size={17}/>Respaldo del proyecto</button><span className="small-note">CONTPAQi requiere un perfil de producto y versión validado. Consulta su estado en Configuración.</span></div>
+          <div className="export-options"><button className="button secondary" onClick={()=>void run('Creando Google Sheets',async()=>{const url=await exportToGoogleSheets(project,result,googleId);await openExternal(url);flash('Hoja creada en tu cuenta de Google.');})}><FileSpreadsheet size={17}/>Abrir en Google Sheets</button><button className="button secondary" onClick={()=>void run('Guardando respaldo',async()=>{await backupProject(project);flash(isDesktop()?'Respaldo guardado.':'Se solicitó la descarga del respaldo. Revisa Descargas.');})}><FolderOpen size={17}/>Respaldo del proyecto</button><span className="small-note">CONTPAQi requiere un perfil de producto y versión validado. Consulta su estado en Configuración.</span></div>
         </>:project&&page==='chat'?<>
           <PageTitle eyebrow="INFORMACIÓN QUE COMPLETA TU TRABAJO" title="Asistente del proyecto" subtitle="Agrega datos, aclara pendientes y entiende tus registros. El chat guiado es gratis." action={<Status kind="success"><span className="status-dot success"/>Sin IA obligatoria</Status>}/>
-          <div className="chat-layout"><section className="panel chat-window"><div className="chat-messages"><div className="chat-bubble assistant"><span className="chat-avatar"><MessageSquareText size={18}/></span><div><strong>Un poco más de contexto ayuda mucho.</strong><p>Puedes decirme el periodo, el método o una operación nueva. Te mostraré la propuesta antes de modificar los datos.</p></div></div>{project.chat.map(m=><div className={'chat-bubble '+m.role} key={m.id}>{m.role==='assistant'&&<span className="chat-avatar"><MessageSquareText size={17}/></span>}<div><p>{m.text}</p>{m.proposal&&m.proposal.kind!=='clarification'&&<button className="button primary compact" onClick={()=>confirmProposal(m.id,m.proposal!)}><Check size={14}/>Confirmar información</button>}{m.proposal?.kind==='clarification'&&<button className="button secondary compact" onClick={()=>setModal('operation')}>Abrir captura de movimiento</button>}<small>{new Date(m.at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</small></div></div>)}<div ref={chatEnd}/></div><div className="chat-examples">{['El periodo es enero de 2026','Usar método analítico','Cambiar a PEPS'].map(t=><button key={t} onClick={()=>setChatText(t)}>{t}</button>)}</div><div className="chat-composer"><textarea aria-label="Mensaje al asistente" placeholder="Escribe la información que quieres agregar…" value={chatText} onChange={e=>setChatText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submitChat()}}}/><button className="icon-button attach" title="Adjuntar documentos" onClick={()=>uploadRef.current?.click()}><Plus size={21}/></button><button className="send-button" title="Enviar mensaje" onClick={submitChat} disabled={!chatText.trim()||project.closed}><Send size={18}/></button></div><p className="chat-footnote">Solo los datos confirmados entran al cálculo. Cada cambio queda en el historial.</p></section><aside className="chat-side"><section className="panel panel-body"><span className="ai-badge"><Sparkles size={19}/></span><h3>Preguntas más abiertas</h3><p>Si lo deseas, consulta con tu propio ChatGPT. Tú eliges qué información compartir.</p><Status kind={ai.connected?'success':'muted'}>{ai.connected?'Cuenta conectada':'Opcional · cuenta propia'}</Status>{!ai.connected?<button className="button secondary full" onClick={()=>void run('Conectando ChatGPT',async()=>{setAi(await connectChatGPT());flash('ChatGPT conectado con tu cuenta.');})}>Continuar con ChatGPT <ArrowUpRight size={14}/></button>:<><textarea aria-label="Pregunta a ChatGPT" placeholder="¿Qué significa esta observación?" value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/><button className="button primary full" disabled={!aiQuestion.trim()} onClick={()=>void run('Consultando tu ChatGPT',async()=>{const context=JSON.stringify({jurisdiction:'MX',period:project.period,mode:project.mode,inventorySystem:project.inventorySystem,issues:result?.issues.map(i=>({code:i.code,title:i.title,detail:i.detail,suggestion:i.suggestion}))});setAiAnswer(await askChatGPT(aiQuestion,context));})}>Consultar con contexto de revisión</button><small>Se enviarán periodo, modalidad y observaciones. Los archivos originales no se adjuntan.</small></>}{aiAnswer&&<div className="ai-answer">{aiAnswer}</div>}</section><section className="context-card"><h4><ClipboardList size={16}/>Contexto confirmado</h4><dl><dt>Periodo</dt><dd>{monthLabel(project.period)}</dd><dt>Método</dt><dd>{project.inventorySystem==='analytical'?'Analítico':'Perpetuos'}</dd><dt>Valuación</dt><dd>{project.valuation==='fifo'?'PEPS':'Promedio móvil'}</dd><dt>Documentos</dt><dd>{project.documents.length}</dd></dl>{project.notes.length>0&&<div className="project-notes">{project.notes.map((n,i)=><p key={i}>{n}</p>)}</div>}</section></aside></div>
+          <div className="chat-layout"><section className="panel chat-window"><div className="chat-messages"><div className="chat-bubble assistant"><span className="chat-avatar"><MessageSquareText size={18}/></span><div><strong>Un poco más de contexto ayuda mucho.</strong><p>Puedes decirme el periodo, el método o una operación nueva. Te mostraré la propuesta antes de modificar los datos.</p></div></div>{project.chat.map(m=><div className={'chat-bubble '+m.role} key={m.id}>{m.role==='assistant'&&<span className="chat-avatar"><MessageSquareText size={17}/></span>}<div><p>{m.text}</p>{m.proposal&&m.proposal.kind!=='clarification'&&<button className="button primary compact" onClick={()=>confirmProposal(m.id,m.proposal!)}><Check size={14}/>Confirmar información</button>}{m.proposal?.kind==='clarification'&&<button className="button secondary compact" onClick={()=>setModal('operation')}>Abrir captura de movimiento</button>}<small>{new Date(m.at).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</small></div></div>)}<div ref={chatEnd}/></div><div className="chat-examples">{['El periodo es enero de 2026','Usar método analítico','Cambiar a PEPS'].map(t=><button key={t} onClick={()=>setChatText(t)}>{t}</button>)}</div><div className="chat-composer"><textarea aria-label="Mensaje al asistente" placeholder="Escribe la información que quieres agregar…" value={chatText} onChange={e=>setChatText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();submitChat()}}}/><button className="icon-button attach" title="Adjuntar documentos" onClick={()=>uploadRef.current?.click()}><Plus size={21}/></button><button className="send-button" title="Enviar mensaje" onClick={submitChat} disabled={!chatText.trim()||project.closed}><Send size={18}/></button></div><p className="chat-footnote">Solo los datos confirmados entran al cálculo. Cada cambio queda en el historial.</p></section><aside className="chat-side"><section className="panel panel-body"><span className="ai-badge"><Sparkles size={19}/></span><h3>Preguntas más abiertas</h3><p>Si lo deseas, consulta con tu propio ChatGPT. Tú eliges qué información compartir.</p><Status kind={ai.connected?'success':'muted'}>{ai.connected?'Cuenta conectada':'Opcional · cuenta propia'}</Status>{!ai.connected?<button className="button secondary full" onClick={()=>void run('Conectando ChatGPT',async()=>{setAi(await connectChatGPT());flash('ChatGPT conectado con tu cuenta.');})}>Continuar con ChatGPT <ArrowUpRight size={14}/></button>:<><textarea aria-label="Pregunta a ChatGPT" placeholder="¿Qué significa esta observación?" value={aiQuestion} onChange={e=>setAiQuestion(e.target.value)}/><button className="button primary full" disabled={!aiQuestion.trim()} onClick={()=>void run('Consultando tu ChatGPT',async()=>{const context=JSON.stringify({jurisdiction:'MX',period:project.period,mode:project.mode,inventorySystem:project.inventorySystem,issues:result?.issues.map(i=>({code:i.code,title:i.title,detail:i.detail,suggestion:i.suggestion}))});setAiAnswer(await askChatGPT(aiQuestion,context));})}>Consultar con contexto de revisión</button><small>Se enviarán periodo, modalidad y observaciones. Los archivos originales no se adjuntan.</small></>}{aiAnswer&&<div className="ai-answer">{aiAnswer}</div>}</section><section className="context-card"><h4><ClipboardList size={16}/>Contexto confirmado</h4><dl><dt>Periodo</dt><dd>{monthLabel(project.period)}</dd><dt>Método</dt><dd>{project.inventorySystem==='analytical'?'Analítico':'Perpetuos'}</dd><dt>Valuación</dt><dd>{project.valuation==='fifo'?'PEPS':'Promedio móvil'}</dd><dt>Documentos</dt><dd>{project.documents.length}</dd></dl>{project.notes.length>0&&<div className="project-notes">{project.notes.map((n,i)=><p key={i}>{n}</p>)}</div>}</section></aside></div>
         </>:page==='rules'?<RulesPage/>:page==='settings'?<>
           <PageTitle eyebrow="TU ESPACIO, A TU MANERA" title="Configuración" subtitle="Los cambios de periodo y método conservan una revisión del proyecto."/>
           {project&&<SettingsPanel project={project} onChange={change} onEdit={edit} onOpening={()=>setModal('opening')} onAccount={()=>setModal('account')} onHistory={()=>setModal('history')} onDelete={()=>void run('Eliminando proyecto',async()=>{await deleteProject(project.id);const remaining=projects.filter(p=>p.id!==project.id);setProjects(remaining);setActiveId(remaining[0]?.id||'');setPage('overview');flash('Proyecto eliminado de este equipo.');})} onFlash={flash} result={result!}/>}
-          <section className="panel panel-body"><h2>Conexiones opcionales</h2><div className="settings-row"><div><strong>Google Sheets</strong><p>Usa un cliente OAuth de escritorio registrado en tu proyecto de Google. La autorización se realiza en el navegador. Un JSON de credenciales se mantiene en memoria hasta que el almacén nativo lo proteja.</p></div><label className="field"><span>Client ID o JSON OAuth de escritorio</span><input value={googleId} placeholder="…apps.googleusercontent.com" onChange={e=>{const value=e.target.value;setGoogleId(value);if(/^[\w.-]+\.apps\.googleusercontent\.com$/.test(value.trim()))localStorage.setItem('contaez-google-client',value.trim());else localStorage.removeItem('contaez-google-client');}}/></label></div><div className="settings-row"><div><strong>Tu ChatGPT</strong><p>{ai.connected?ai.email||'Conectado con tu cuenta':'El cálculo contable funciona sin esta conexión.'}</p></div>{ai.connected?<div className="button-group"><button className="button secondary" onClick={()=>void openExternal('https://chatgpt.com/settings/usage')}>Administrar uso</button><button className="button secondary" onClick={()=>void run('Desconectando ChatGPT',async()=>{try{await disconnectChatGPT();}finally{setAi(await getChatGPTStatus());}})}>Desconectar</button></div>:<button className="button secondary" onClick={()=>void run('Conectando ChatGPT',async()=>setAi(await connectChatGPT()))}>Continuar con ChatGPT</button>}</div><div className="settings-row"><div><strong>CONTPAQi</strong><p>La exportación de pólizas se habilita al validar un perfil del producto y versión de destino con una empresa de prueba.</p></div><Status kind="warning">Validación externa pendiente</Status></div></section>
-          <section className="panel panel-body about-panel"><Brand/><h3>Contabilidad clara. Hecha para México.</h3><p>ContaEZ 0.1 · Gratuita y de código abierto · GPL-3.0</p><p>{DISCLAIMER}</p><div className="about-links"><a href="https://www.instagram.com/betcover_ii/" target="_blank" rel="noreferrer">Creada por @betcover_ii <ArrowUpRight size={15}/></a><a href="mailto:gallardoquirozd4@gmail.com">gallardoquirozd4@gmail.com</a></div><small>Los cálculos y revisiones cubren los módulos implementados. Revisa el alcance y los pendientes antes de usar resultados profesionales.</small></section>
+          <section className="panel panel-body"><h2>Conexiones opcionales</h2><div className="settings-row"><div><strong>Google Sheets</strong><p>Usa un cliente OAuth de escritorio registrado en tu proyecto de Google. La autorización se realiza en el navegador. Un JSON de credenciales se mantiene en memoria hasta que el almacén nativo lo proteja.</p></div><label className="field"><span>Client ID o JSON OAuth de escritorio</span><input value={googleId} placeholder="…apps.googleusercontent.com" onChange={e=>{const value=e.target.value;setGoogleId(value);rememberGoogleClient(value);}}/></label></div><div className="settings-row"><div><strong>Tu ChatGPT</strong><p>{ai.connected?ai.email||'Conectado con tu cuenta':'El cálculo contable funciona sin esta conexión.'}</p></div>{ai.connected?<div className="button-group"><button className="button secondary" onClick={()=>void openExternal('https://chatgpt.com/settings/usage')}>Administrar uso</button><button className="button secondary" onClick={()=>void run('Desconectando ChatGPT',async()=>{try{await disconnectChatGPT();}finally{setAi(await getChatGPTStatus());}})}>Desconectar</button></div>:<button className="button secondary" onClick={()=>void run('Conectando ChatGPT',async()=>setAi(await connectChatGPT()))}>Continuar con ChatGPT</button>}</div><div className="settings-row"><div><strong>CONTPAQi</strong><p>La exportación de pólizas se habilita al validar un perfil del producto y versión de destino con una empresa de prueba.</p></div><Status kind="warning">Validación externa pendiente</Status></div></section>
+          <section className="panel panel-body about-panel"><Brand/><h3>Contabilidad clara. Hecha para México.</h3><p>ContaEZ {appVersion} · Gratuita y de código abierto · GPL-3.0</p><p>{DISCLAIMER}</p><div className="about-links"><a href="https://www.instagram.com/betcover_ii/" target="_blank" rel="noreferrer">Creada por @betcover_ii <ArrowUpRight size={15}/></a><a href="mailto:gallardoquirozd4@gmail.com">gallardoquirozd4@gmail.com</a></div><small>Los cálculos y revisiones cubren los módulos implementados. Revisa el alcance y los pendientes antes de usar resultados profesionales.</small></section>
         </>:null}
         <footer className="app-footer"><span>ContaEZ <i/> Contabilidad para México</span><span>Gratis, con o sin IA.</span></footer>
       </main>
     </div>
     <input ref={uploadRef} className="visually-hidden" type="file" multiple accept=".xlsx,.xml,.csv,.pdf,.png,.jpg,.jpeg,.webp,.json,.contaez" aria-label="Seleccionar documentos" onChange={e=>{if(e.target.files)void importFiles(e.target.files);e.target.value=''}}/>
-    {modal==='new'&&<Modal title="Un proyecto nuevo" subtitle="Elige cómo quieres trabajar y define el periodo." onClose={()=>setModal(null)}><div className="mode-selector">{(Object.keys(MODES) as Mode[]).filter(mode=>mode!=='student').map(m=><button key={m} className={newMode===m?'selected':''} onClick={()=>setNewMode(m)}>{(() => {const I=MODES[m].icon;return <I size={22}/>})()}<span>{MODES[m].label}</span></button>)}</div><label className="field"><span>Nombre del proyecto</span><input autoFocus placeholder={newMode==='student'?'Ej. Práctica de inventarios':'Ej. Comercializadora del Pacífico'} value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')handleCreate()}}/></label><label className="field"><span>Periodo</span><input type="month" min="2025-01" max="2026-12" value={newPeriod} onChange={e=>setNewPeriod(e.target.value)}/></label><p className="small-note">México · MXN · {newMode==='student'?'Uso académico':newMode==='business'?'Régimen general de personas morales':'Actividad empresarial y profesional'}</p><div className="modal-actions"><button className="button secondary" onClick={()=>addProject(makeDemoProject(newMode))}>Ver ejemplo de esta modalidad</button><button className="button primary" disabled={!newName.trim()||!/^202[56]-\d{2}$/.test(newPeriod)} onClick={handleCreate}>Crear proyecto <ArrowRight size={16}/></button></div></Modal>}
+    <input ref={backupRef} hidden type="file" accept=".json,.contaez" aria-label="Seleccionar respaldo" onChange={e=>{if(e.target.files)void importFiles(e.target.files);e.target.value=''}}/>
+    </div>
+    {modal==='new'&&<Modal title="Un proyecto nuevo" subtitle="Elige cómo quieres trabajar y define el periodo." onClose={()=>setModal(null)}><div className="mode-selector">{PROFESSIONAL_MODES.map(m=><button key={m} className={newMode===m?'selected':''} aria-pressed={newMode===m} onClick={()=>setNewMode(m)}>{(() => {const I=MODES[m].icon;return <I size={22}/>})()}<span>{MODES[m].label}</span></button>)}</div><label className="field"><span>Nombre del proyecto</span><input autoFocus placeholder="Ej. Comercializadora del Pacífico" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void handleCreate()}}/></label><label className="field"><span>Periodo</span><input type="month" min="2025-01" max="2026-12" value={newPeriod} onChange={e=>setNewPeriod(e.target.value)}/></label><p className="small-note">México · MXN · {newMode==='business'?'Régimen general de personas morales':'Actividad empresarial y profesional'}</p><div className="modal-actions"><button className="button secondary" disabled={!!busy} onClick={()=>void run('Abriendo ejemplo',()=>addProject(makeDemoProject(newMode)))}>Ver ejemplo de esta modalidad</button><button className="button primary" disabled={!!busy||!newName.trim()||!eligiblePeriod(newPeriod)} onClick={()=>void handleCreate()}>Crear proyecto <ArrowRight size={16}/></button></div></Modal>}
     {modal==='operation'&&project&&<OperationModal project={project} initial={editingOperation} onClose={()=>{setModal(null);setEditingOperation(null)}} onSave={op=>{edit(p=>({...p,operations:editingOperation?p.operations.map(x=>x.id===op.id?op:x):[...p.operations,op]}),'Registrar '+OP_LABELS[op.type]);setModal(null);setEditingOperation(null);flash('Movimiento registrado y reportes actualizados.');}}/>}
     {modal==='adjustment'&&project&&<OpeningModal project={project} kind="adjustment" onClose={()=>setModal(null)} onSave={entry=>{edit(p=>({...p,manualEntries:[...p.manualEntries,entry]}),'Registrar asiento manual');setModal(null);flash('Asiento manual registrado y revisado por el motor.');}}/>}
     {modal==='opening'&&project&&<OpeningModal project={project} onClose={()=>setModal(null)} onSave={entry=>{edit(p=>({...p,manualEntries:[...p.manualEntries.filter(e=>e.kind!=='opening'),entry],taxConfig:{...p.taxConfig,openingBalancesConfirmed:true}}),'Registrar apertura');setModal(null);flash('Apertura registrada.');}}/>}
     {modal==='account'&&project&&<AccountModal accounts={project.accounts} onClose={()=>setModal(null)} onSave={a=>{edit(p=>({...p,accounts:[...p.accounts,a]}),'Agregar cuenta');setModal(null);flash('Cuenta agregada al catálogo.');}}/>}
     {modal==='asset'&&project&&<AssetModal project={project} onClose={()=>setModal(null)} onSave={a=>{edit(p=>({...p,assets:[...p.assets,a]}),'Registrar activo');setModal(null);flash('Activo registrado. Revisa que su adquisición esté en los asientos.');}}/>}
     {modal==='lot'&&project&&<LotModal project={project} onClose={()=>setModal(null)} onSave={lot=>{edit(p=>({...p,inventoryInitial:[...p.inventoryInitial,lot]}),'Registrar inventario inicial');setModal(null);flash('Existencias iniciales registradas. Comprueba su valor en la apertura.');}}/>}
-    {modal==='history'&&project&&<Modal title="Historial de revisiones" subtitle="Restaura un estado anterior conservando el registro de la recuperación." onClose={()=>setModal(null)}>{project.revisions.length?<div className="revision-list">{project.revisions.slice().reverse().map(r=><div className="settings-row" key={r.id}><div><strong>{r.label}</strong><p>{new Date(r.at).toLocaleString('es-MX')}</p></div><button className="button secondary compact" onClick={()=>{change(restoreRevision(project,r.id));setModal(null);flash('Revisión restaurada.');}}>Restaurar</button></div>)}</div>:<Empty icon={History} title="Aún no hay revisiones" text="Las importaciones y cambios importantes guardarán un estado anterior."/>}</Modal>}
+    {modal==='history'&&project&&<Modal title="Historial de revisiones" subtitle="Restaura un estado anterior conservando el registro de la recuperación." onClose={()=>setModal(null)}>{project.revisions.length?<div className="revision-list">{project.revisions.slice().reverse().map(r=><div className="settings-row" key={r.id}><div><strong>{r.label}</strong><p>{new Date(r.at).toLocaleString('es-MX')}</p></div><button className="button secondary compact" onClick={()=>{const restored=restoreRevision(project,r.id);change(restored.id===project.id?restored:{...restored,id:project.id,name:project.name});setModal(null);flash('Revisión restaurada.');}}>Restaurar</button></div>)}</div>:<Empty icon={History} title="Aún no hay revisiones" text="Las importaciones y cambios importantes guardarán un estado anterior."/>}</Modal>}
     {busy&&<div className="busy-overlay" role="status"><LoaderCircle className="spin" size={23}/><span>{busy}…</span></div>}
     {toast&&<div className={'toast '+(toast.error?'error':'')} role="status">{toast.error?<CircleHelp size={19}/>:<Check size={19}/>}<span>{toast.text}</span><button className="icon-button" onClick={()=>setToast(null)} title="Cerrar aviso"><X size={16}/></button></div>}
   </div>;
@@ -162,11 +268,96 @@ function FinancialStatement({title,project,rows}:{title:string;project:Project;r
 function Modal({title,subtitle,children,onClose}:{title:string;subtitle:string;children:ReactNode;onClose:()=>void}){return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><section className="modal" role="dialog" aria-modal="true" aria-label={title}><button className="icon-button modal-close" title="Cerrar" onClick={onClose}><X size={21}/></button><h2>{title}</h2><p className="modal-subtitle">{subtitle}</p>{children}</section></div>}
 
 function OperationModal({project,initial,onClose,onSave}:{project:Project;initial?:Operation|null;onClose:()=>void;onSave:(o:Operation)=>void}){
-  const [type,setType]=useState<OperationType>(initial?.type||'expense'),[description,setDescription]=useState(initial?.description||''),[date,setDate]=useState(initial?.date||project.period+'-01'),[amount,setAmount]=useState(initial?.amount||''),[vat,setVat]=useState(initial?.vatRate||'0.16'),[payment,setPayment]=useState<'cash'|'bank'|'credit'>(initial?.paymentMethod||'bank'),[account,setAccount]=useState(initial?.accountCode||'601.01'),[product,setProduct]=useState(initial?.productId||''),[quantity,setQuantity]=useState(initial?.quantity||''),[cost,setCost]=useState(initial?.unitCost||''),[related,setRelated]=useState(initial?.relatedOperationId||''),[deductible,setDeductible]=useState(initial?.taxDeductible||false),[error,setError]=useState('');
-  const inventory=['purchase','purchase_return'].includes(type)||(['sale','sale_return'].includes(type)&&(project.mode!=='individual'||!!product)),linked=['collection','payment','purchase_return','sale_return'].includes(type);
-  const total=(()=>{try{return new Decimal(amount||0).mul(new Decimal(1).plus(vat)).toFixed(2)}catch{return '0'}})();
-  const submit=()=>{try{if(!description.trim())throw new Error('Escribe un concepto.');if(!amount||!new Decimal(amount).gt(0))throw new Error('Indica una base mayor a cero.');if(!date.startsWith(project.period))throw new Error('La fecha debe estar dentro del periodo del proyecto.');if(linked&&!related)throw new Error('Relaciona la operación original.');if(inventory&&(!product.trim()||!new Decimal(quantity||0).gt(0)))throw new Error('Indica artículo y cantidad.');onSave({id:initial?.id||newId(),type,description:description.trim(),date,amount:new Decimal(amount).toFixed(2),vatRate:vat,paymentMethod:payment,accountCode:account,productId:inventory?product.trim():undefined,quantity:inventory?quantity:undefined,unitCost:cost||undefined,relatedOperationId:related||undefined,sourceIds:initial?.sourceIds||[],confirmed:true,taxDeductible:deductible,invoiceId:initial?.invoiceId});}catch(e){setError(e instanceof Error?e.message:String(e))}};
-  return <Modal title="Registrar movimiento" subtitle="Captura el subtotal sin IVA. Verifica el total antes de confirmar." onClose={onClose}><div className="form-grid"><label className="field"><span>Tipo de operación</span><select value={type} onChange={e=>{setType(e.target.value as OperationType);if(e.target.value==='contribution')setVat('0');}}>{Object.entries(OP_LABELS).filter(([k])=>k!=='adjustment').map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="field"><span>Fecha</span><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><label className="field span-two"><span>Concepto</span><input autoFocus placeholder="Ej. Compra de mercancía a proveedor" value={description} onChange={e=>setDescription(e.target.value)}/></label><label className="field"><span>Subtotal sin IVA</span><input type="number" min="0.01" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)}/></label><label className="field"><span>IVA</span><select value={vat} onChange={e=>setVat(e.target.value)}><option value="0.16">16 %</option><option value="0.08">8 % · verificar elegibilidad</option><option value="0">0 % · verificar tratamiento</option></select></label><label className="field"><span>Forma de pago</span><select value={payment} onChange={e=>setPayment(e.target.value as typeof payment)}><option value="bank">Bancos</option><option value="cash">Efectivo</option><option value="credit">A crédito</option></select></label>{type==='expense'&&<label className="field"><span>Cuenta del gasto</span><select value={account} onChange={e=>setAccount(e.target.value)}>{project.accounts.filter(a=>a.type==='expense').map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}</select></label>}{inventory&&<><label className="field"><span>Artículo / clave</span><input value={product} placeholder="Ej. OMEGA" onChange={e=>setProduct(e.target.value)}/></label><label className="field"><span>Cantidad</span><input type="number" min="0.000001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>{type==='purchase'&&<label className="field"><span>Costo unitario sin IVA</span><input type="number" min="0" step="any" value={cost} placeholder="Base ÷ cantidad" onChange={e=>setCost(e.target.value)}/></label>}</>}{linked&&<label className="field span-two"><span>Operación original</span><select value={related} onChange={e=>{setRelated(e.target.value);const op=project.operations.find(x=>x.id===e.target.value);if(op){setProduct(op.productId||'');setVat(op.vatRate);}}}><option value="">Selecciona la factura u operación</option>{project.operations.filter(o=>o.confirmed&&(type==='collection'||type==='sale_return'?o.type==='sale':o.type==='purchase'||o.type==='expense')).map(o=><option key={o.id} value={o.id}>{o.description} · {dateLabel(o.date)} · {currency(o.amount)}</option>)}</select></label>}</div>{type==='expense'&&<label className="check-field"><input type="checkbox" checked={deductible} onChange={e=>setDeductible(e.target.checked)}/><span>Deducción fiscal revisada y respaldada por documentación</span></label>}<div className="form-total"><span>Total con IVA</span><strong>{currency(total)}</strong></div>{error&&<p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button className="button secondary" onClick={onClose}>Cancelar</button><button className="button primary" onClick={submit}><Check size={16}/>Confirmar movimiento</button></div></Modal>;
+  const [type,setType]=useState<OperationType>(initial?.type||'expense');
+  const [description,setDescription]=useState(initial?.description||'');
+  const [date,setDate]=useState(initial?.date||project.period+'-01');
+  const [amount,setAmount]=useState(initial?.amount||'');
+  const [vat,setVat]=useState(normalizeRate(initial?.vatRate||'0.16'));
+  const [payment,setPayment]=useState<Operation['paymentMethod']>(initial?.paymentMethod||'bank');
+  const [account,setAccount]=useState(initial?.accountCode||'601.01');
+  const [product,setProduct]=useState(initial?.productId||'');
+  const [quantity,setQuantity]=useState(initial?.quantity||'');
+  const [cost,setCost]=useState(initial?.unitCost||'');
+  const [related,setRelated]=useState(initial?.relatedOperationId||'');
+  const [deductible,setDeductible]=useState(initial?.taxDeductible===undefined?'':String(initial.taxDeductible));
+  const [error,setError]=useState('');
+  const referenceOnly=initial?.referenceOnly===true;
+  const inventory=['purchase','purchase_return'].includes(type)||(['sale','sale_return'].includes(type)&&(project.mode!=='individual'||!!product));
+  const settlement=type==='collection'||type==='payment';
+  const linked=settlement||type==='purchase_return'||type==='sale_return';
+  const fiscalReview=project.mode==='individual'&&['expense','purchase','purchase_return','payment'].includes(type);
+  const relatedOptions=project.operations.filter(o=>{
+    if(o.id===initial?.id||!o.confirmed)return false;
+    if(settlement&&o.paymentMethod!=='credit')return false;
+    if(!settlement&&o.referenceOnly)return false;
+    return type==='collection'||type==='sale_return'?o.type==='sale':o.type==='purchase'||(type==='payment'&&o.type==='expense');
+  });
+  const total=(()=>{
+    try{return new Decimal(amount||0).mul(new Decimal(1).plus(vat)).toFixed(2);}
+    catch{return null;}
+  })();
+  const submit=()=>{
+    try{
+      if(!description.trim())throw new Error('Escribe un concepto.');
+      const subtotal=new Decimal(amount||0);
+      if(!subtotal.isFinite()||subtotal.lt('0.01'))throw new Error('Indica una base de al menos $0.01.');
+      if(!validCalendarDate(date)||(!referenceOnly&&!date.startsWith(project.period+'-'))||(referenceOnly&&date>=project.period+'-01')) {
+        throw new Error(referenceOnly?'La fecha del saldo anterior debe preceder al periodo del proyecto.':'La fecha debe estar dentro del periodo del proyecto.');
+      }
+      if(linked&&!relatedOptions.some(op=>op.id===related))throw new Error('Relaciona una operación original compatible.');
+      if(inventory&&!referenceOnly){
+        const units=new Decimal(quantity||0);
+        if(!product.trim()||!units.isFinite()||!units.gt(0))throw new Error('Indica artículo y una cantidad válida.');
+      }
+      if(referenceOnly&&new Decimal(initial!.openingOutstandingBase??0).gt(subtotal))throw new Error('La base debe cubrir el saldo inicial pendiente.');
+      onSave({
+        ...initial,id:initial?.id||newId(),type,description:description.trim(),date,amount:subtotal.toFixed(2),
+        vatRate:vat,paymentMethod:payment,accountCode:type==='expense'?account:initial?.accountCode,
+        productId:inventory||referenceOnly?product.trim()||undefined:undefined,
+        quantity:inventory||referenceOnly?quantity||undefined:undefined,unitCost:type==='purchase'?cost||undefined:undefined,
+        relatedOperationId:linked?related:undefined,sourceIds:initial?.sourceIds||[],confirmed:true,
+        taxDeductible:fiscalReview?deductible===''?undefined:deductible==='true':initial?.taxDeductible
+      });
+    }catch(e){setError(e instanceof Error?e.message:String(e));}
+  };
+  return <Modal title={initial?'Editar movimiento':'Registrar movimiento'} subtitle="Captura el subtotal sin IVA y verifica el total antes de confirmar." onClose={onClose}>
+    {referenceOnly&&<p className="small-note">Saldo de una operación anterior. Conserva su relación con los cobros o pagos de este periodo.</p>}
+    <div className="form-grid">
+      <label className="field"><span>Tipo de operación</span><select value={type} disabled={referenceOnly} onChange={e=>{
+        const nextType=e.target.value as OperationType;
+        setType(nextType);setRelated('');
+        if(nextType==='contribution')setVat('0');
+        if((nextType==='collection'||nextType==='payment')&&payment==='credit')setPayment('bank');
+      }}>{Object.entries(OP_LABELS).filter(([k])=>k!=='adjustment'||k===type).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+      <label className="field"><span>Fecha</span><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label>
+      <label className="field span-two"><span>Concepto</span><input autoFocus placeholder="Ej. Compra de mercancía a proveedor" value={description} onChange={e=>setDescription(e.target.value)}/></label>
+      <label className="field"><span>Subtotal sin IVA</span><input type="number" min="0.01" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)}/></label>
+      <label className="field"><span>IVA</span><select disabled={type==='contribution'} value={vat} onChange={e=>setVat(e.target.value)}>
+        <option value="0.16">16 %</option><option value="0.08">8 % · verificar elegibilidad</option><option value="0">0 % · verificar tratamiento</option>
+        {!['0.16','0.08','0'].includes(vat)&&<option value={vat}>Tasa registrada ({vat})</option>}
+      </select></label>
+      <label className="field"><span>Forma de pago</span><select value={payment} disabled={referenceOnly} onChange={e=>setPayment(e.target.value as Operation['paymentMethod'])}>
+        <option value="bank">Bancos</option><option value="cash">Efectivo</option><option value="credit" disabled={settlement}>A crédito</option>
+      </select></label>
+      {type==='expense'&&<label className="field"><span>Cuenta del gasto</span><select value={account} onChange={e=>setAccount(e.target.value)}>{project.accounts.filter(a=>a.type==='expense').map(a=><option key={a.code} value={a.code}>{a.code} · {a.name}</option>)}</select></label>}
+      {inventory&&!referenceOnly&&<>
+        <label className="field"><span>Artículo / clave</span><input value={product} placeholder="Ej. OMEGA" onChange={e=>setProduct(e.target.value)}/></label>
+        <label className="field"><span>Cantidad</span><input type="number" min="0.000001" step="any" value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>
+        {type==='purchase'&&<label className="field"><span>Costo unitario sin IVA</span><input type="number" min="0" step="any" value={cost} placeholder="Base ÷ cantidad" onChange={e=>setCost(e.target.value)}/></label>}
+      </>}
+      {linked&&<label className="field span-two"><span>Operación original</span><select value={related} onChange={e=>{
+        const op=relatedOptions.find(item=>item.id===e.target.value);
+        setRelated(e.target.value);
+        if(op){setProduct(op.productId||'');setVat(normalizeRate(op.vatRate));}
+      }}><option value="">Selecciona la factura u operación</option>{relatedOptions.map(o=><option key={o.id} value={o.id}>{o.description} · {dateLabel(o.date)} · {currency(o.amount)}</option>)}</select></label>}
+    </div>
+    {fiscalReview&&<label className="field"><span>Deducción fiscal para ISR</span><select value={deductible} onChange={e=>setDeductible(e.target.value)}>
+      <option value="">Por confirmar</option><option value="true">Deducible, con documentación revisada</option><option value="false">No deducible</option>
+    </select></label>}
+    <div className="form-total"><span>Total con IVA</span><strong>{total===null?'Por verificar':currency(total)}</strong></div>
+    {error&&<p className="form-error" role="alert">{error}</p>}
+    <div className="modal-actions"><button className="button secondary" onClick={onClose}>Cancelar</button><button className="button primary" onClick={submit}><Check size={16}/>Confirmar movimiento</button></div>
+  </Modal>;
 }
 
 function OpeningModal({project,kind='opening',onClose,onSave}:{project:Project;kind?:'opening'|'adjustment';onClose:()=>void;onSave:(e:JournalEntry)=>void}){

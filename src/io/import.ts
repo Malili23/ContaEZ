@@ -1,7 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import Decimal from 'decimal.js';
 import type { Project, SourceDocument, Operation, JournalEntry, BankTransaction, Issue } from '../core/types';
-import { auditWorkbook, type WorkbookAudit } from './audit';
+import { auditRawWorkbook, type WorkbookAudit } from './audit';
 import { readRawWorkbook, asArray, cellParts } from './workbook';
 
 export interface ImportResult { documents:SourceDocument[]; operations:Operation[]; entries:JournalEntry[]; bankTransactions:BankTransaction[]; issues:Issue[]; audit?:WorkbookAudit; }
@@ -75,33 +75,42 @@ export function parseCfdi(text:string,p:Project,document:SourceDocument):Pick<Im
   document.text=JSON.stringify({version,issuer,recipient,subtotal:cfdi.SubTotal,discount:cfdi.Descuento??'0',vat:actualVat.toFixed(2),total:cfdi.Total,method:cfdi.MetodoPago,concepts:descriptions});return {operations,issues};
 }
 async function importExcel(bytes:Uint8Array,p:Project,document:SourceDocument,result:ImportResult){
-  const book=readRawWorkbook(bytes);result.audit=await auditWorkbook(bytes,document.name);for(const finding of result.audit.findings)result.issues.push({...issue(`XLSX_${finding.code}`,finding.message,`${finding.sheet}!${finding.cell}${finding.original?`: ${finding.original}`:''}`,finding.suggestion,document.id,finding.severity),location:`${finding.sheet}!${finding.cell}`});
+  const book=readRawWorkbook(bytes);result.audit=auditRawWorkbook(book,document.name);for(const finding of result.audit.findings)result.issues.push({...issue(`XLSX_${finding.code}`,finding.message,`${finding.sheet}!${finding.cell}${finding.original?`: ${finding.original}`:''}`,finding.suggestion,document.id,finding.severity),location:`${finding.sheet}!${finding.cell}`});
   // Prefer the stable ContaEZ operations table. Other workbooks are diagnostic until mapping is confirmed.
   const ops=book.sheets.find(s=>norm(s.name)==='operaciones');
   if(ops){
     const headerA=norm(ops.cells.get('A4')?.value??'');if(headerA==='id'){
       const rows=new Set([...ops.cells.keys()].map(a=>cellParts(a)[1]).filter(r=>r>=5));
+      const knownIds = new Set(p.operations.map(operation => operation.id));
       for(const r of rows){const get=(col:string)=>ops.cells.get(`${col}${r}`)?.value??'';const opType=get('C') as Operation['type'];if(!['purchase','sale','expense','collection','payment','purchase_return','sale_return','contribution','adjustment'].includes(opType))continue;
         const amount=numeric(get('E')),vatRate=numeric(get('F'));if(amount===null||vatRate===null)continue;
-        const originalId=get('A');const old=p.operations.find(o=>o.id===originalId);
-        if(old){result.issues.push(issue('OPERATION_REVISION','Una operación ya existe',`${originalId}: se conserva el registro vigente; el archivo se trata como evidencia de otra revisión.`,'Compara cambios en el proyecto antes de reemplazar registros.',document.id));continue;}
+        const originalId=get('A').trim();
+        if(originalId && knownIds.has(originalId)){result.issues.push(issue('OPERATION_REVISION','Una operación ya existe',`${originalId}: se conserva el primer registro; el archivo se trata como evidencia de otra revisión.`,'Compara cambios en el proyecto antes de reemplazar registros.',document.id));continue;}
         const iso=excelDate(get('B'),p.period,book.date1904);if(!iso){result.issues.push(issue('WORKBOOK_DATE','Fecha de operación pendiente',`Fila ${r}: no se pudo interpretar la fecha.`, 'Confirma la fecha; no se sustituyó por el primer día del mes.',document.id));continue;}
-        result.operations.push({id:originalId||id(),date:iso,type:opType,description:get('D'),amount,vatRate,paymentMethod:['cash','bank','credit'].includes(get('G'))?get('G') as Operation['paymentMethod']:'credit',quantity:numeric(get('H'))??undefined,unitCost:numeric(get('I'))??undefined,productId:get('J')||undefined,sourceIds:[document.id],confirmed:false});
+        const operationId = originalId || id();
+        knownIds.add(operationId);
+        result.operations.push({id:operationId,date:iso,type:opType,description:get('D'),amount,vatRate,paymentMethod:['cash','bank','credit'].includes(get('G'))?get('G') as Operation['paymentMethod']:'credit',quantity:numeric(get('H'))??undefined,unitCost:numeric(get('I'))??undefined,productId:get('J')||undefined,sourceIds:[document.id],confirmed:false});
       }
     }
   }
   if(!ops){
     for(const sheet of book.sheets.filter(s=>['ingresos','gastos'].includes(norm(s.name)))){
       const sales=norm(sheet.name)==='ingresos';const rows=[...new Set([...sheet.cells.keys()].map(a=>cellParts(a)[1]).filter(r=>r>=2))].sort((a,b)=>a-b);let missing=0;
+      const knownInvoices = new Set([...p.operations,...result.operations].map(o=>o.invoiceId?.toUpperCase()).filter(Boolean));
       for(const r of rows){const get=(col:string)=>sheet.cells.get(`${col}${r}`)?.value??'';const concept=get(sales?'G':'D');if(!concept)continue;
         const base=numeric(get(sales?'J':'G')),tax=numeric(get(sales?'K':'J')),gross=numeric(get(sales?'L':'K'));if(base===null||new Decimal(base).lte(0)||tax===null||gross===null){missing++;continue;}
-        const discountedBase=new Decimal(base).minus(sales?0:numeric(get('H'))??0);const rate=discountedBase.isZero()?new Decimal(0):new Decimal(tax).div(discountedBase);
+        const discountText = sales ? '' : get('H').trim();
+        const discount = discountText ? numeric(discountText) : '0';
+        if(discount===null || new Decimal(discount).lt(0) || new Decimal(tax).lt(0)){missing++;continue;}
+        const discountedBase=new Decimal(base).minus(discount);if(!discountedBase.gt(0)){missing++;continue;}
+        const rate=new Decimal(tax).div(discountedBase);
         const simpleVat=['0','0.08','0.16'].find(v=>rate.minus(v).abs().lte('0.00001'));
         if(simpleVat===undefined||discountedBase.plus(tax).minus(gross).abs().gt('0.02')){missing++;continue;}
         const iso=excelDate(get('A'),p.period,book.date1904);
         if(!iso){missing++;continue;}
-        const invoiceId=sales?get('E').toUpperCase():undefined;
-        if(invoiceId&&p.operations.some(o=>o.invoiceId===invoiceId))continue;
+        const invoiceId=sales?get('E').trim().toUpperCase():undefined;
+        if(invoiceId&&knownInvoices.has(invoiceId)){missing++;continue;}
+        if(invoiceId)knownInvoices.add(invoiceId);
         const payment=norm(get(sales?'M':'L'));const credit=/credito|ppd/.test(`${payment} ${norm(get('N'))}`);
         const quantity=sales?numeric(get('H')):undefined;
         const productId=sales&&/cemento/.test(norm(concept))?(/25/.test(concept)?'CEMENTO_25KG':/50/.test(concept)?'CEMENTO_50KG':undefined):undefined;
@@ -112,10 +121,51 @@ async function importExcel(bytes:Uint8Array,p:Project,document:SourceDocument,re
   }
   // Reimport ContaEZ journal opening/manual entries without importing generated operation entries twice.
   const journal=book.sheets.find(s=>norm(s.name)==='diario');
-  if(journal&&norm(journal.cells.get('C4')?.value??'')==='codigo'){
-    const groups=new Map<string,JournalEntry>();for(const c of journal.cells.values())if(c.address.startsWith('I')){const r=cellParts(c.address)[1];if(r<5||!c.value||journal.cells.get(`J${r}`)?.value)continue;const code=journal.cells.get(`C${r}`)?.value??'';if(!p.accounts.some(a=>a.code===code))continue;
-      const entry=groups.get(c.value)??{id:c.value,date:journal.cells.get(`A${r}`)?.value||`${p.period}-01`,kind:'opening' as const,concept:journal.cells.get(`E${r}`)?.value||'Asiento importado',sourceIds:[document.id],lines:[]};entry.lines.push({id:id(),accountCode:code,debit:numeric(journal.cells.get(`G${r}`)?.value??'')??'0',credit:numeric(journal.cells.get(`H${r}`)?.value??'')??'0'});groups.set(c.value,entry);
-    }result.entries.push(...[...groups.values()].filter(e=>!p.manualEntries.some(x=>x.id===e.id)));
+  if(journal && norm(journal.cells.get('C4')?.value??'')==='codigo' && norm(journal.cells.get('I4')?.value??'')==='asiento id'){
+    const groups = new Map<string,JournalEntry>();
+    const invalid = new Set<string>();
+    const generated = new Set<string>();
+    const knownAccounts = new Set(p.accounts.map(account => account.code));
+    const knownEntries = new Set(p.manualEntries.map(entry => entry.id));
+    for(const cell of journal.cells.values()) {
+      const [column,row] = cellParts(cell.address);
+      const entryId = cell.value.trim();
+      const get = (col:string) => journal.cells.get(`${col}${row}`)?.value.trim() ?? '';
+      if(column!==9 || row<5 || !entryId || knownEntries.has(entryId)) continue;
+      if(get('J')) {generated.add(entryId);continue;}
+      const accountCode = get('C');
+      const kind = get('B') as JournalEntry['kind'];
+      const entryDate = excelDate(get('A'), p.period, book.date1904);
+      const readAmount = (col:string) => {
+        const amountCell = journal.cells.get(`${col}${row}`);
+        const value = get(col);
+        return value || amountCell?.formula !== undefined ? numeric(value) : '0';
+      };
+      const debit = readAmount('G');
+      const credit = readAmount('H');
+      const previous = groups.get(entryId);
+      if (!entryDate || !['opening','income','expense','diary','adjustment'].includes(kind) || !knownAccounts.has(accountCode) ||
+          debit===null || credit===null || new Decimal(debit).lt(0) || new Decimal(credit).lt(0) ||
+          (new Decimal(debit).gt(0) && new Decimal(credit).gt(0)) ||
+          (previous && (previous.date !== entryDate || previous.kind !== kind))) {
+        invalid.add(entryId);
+        continue;
+      }
+      const entry = previous ?? {id:entryId,date:entryDate,kind,concept:get('E')||'Asiento importado',sourceIds:[document.id],lines:[]};
+      entry.lines.push({id:id(),accountCode,debit,credit});
+      groups.set(entryId,entry);
+    }
+    for(const entry of groups.values()) {
+      if(generated.has(entry.id))continue;
+      if(invalid.has(entry.id) || entry.lines.length<2 || !entry.lines.reduce((sum,line)=>sum.plus(line.debit).minus(line.credit),new Decimal(0)).isZero()) {
+        invalid.add(entry.id);
+        continue;
+      }
+      result.entries.push(entry);
+    }
+    // IDs tied to operations are skipped by design; only notify about incomplete manual entries.
+    const incomplete = [...invalid].filter(entryId => !generated.has(entryId));
+    if(incomplete.length)result.issues.push(issue('XLSX_MANUAL_PENDING','Asientos que requieren revisión',`${incomplete.length} asientos tienen fechas, cuentas, tipos o importes incompletos, inconsistentes o descuadrados.`,'Corrige los datos en el libro y vuelve a importarlo. Si falta un renglón válido, se conserva el asiento completo como pendiente.',document.id));
   }
   document.text=book.sheets.map(s=>`${s.name}: ${[...s.cells.values()].filter(c=>c.type==='s'||c.type==='inlineStr').slice(0,200).map(c=>`${c.address} ${c.value}`).join(' | ')}`).join('\n').slice(0,100_000);
   result.issues.push(issue('WORKBOOK_MAPPING','Libro recibido y revisado',result.operations.length?`${result.operations.length} operaciones propuestas; requieren confirmación.`:'La estructura no es una tabla de operaciones ContaEZ. El diagnóstico está disponible; sus cifras no se incorporaron automáticamente al diario.','Revisa la copia reparada y confirma los datos mediante captura o el chat. No se usará una respuesta posiblemente equivocada como enunciado.',document.id,'info'));

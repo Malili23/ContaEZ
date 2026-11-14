@@ -12,8 +12,22 @@ export const brokenReferenceCount=(formula:string)=>brokenReferences(formula).le
 export function replaceBrokenFormulaReference(formula:string,replacement:string):string{const ref=brokenReferences(formula)[0];return ref?formula.slice(0,ref.start)+replacement+formula.slice(ref.end):formula;}
 const plainText = (v: any): string => typeof v === 'string' ? v : v?.t !== undefined ? xmlText(v.t) : asArray(v?.r).map(x=>xmlText(x.t)).join('');
 export interface RawCell { address: string; value: string; formula?: string; type: string; }
-export interface RawSheet { name: string; path: string; cells: Map<string,RawCell>; xml: string; }
+type FormulaRange = { firstColumn:number; firstRow:number; lastColumn:number; lastRow:number; editableAnchor?:string };
+export interface RawSheet { name: string; path: string; cells: Map<string,RawCell>; xml: string; protectedRanges?: FormulaRange[]; }
 export interface RawBook { files: Record<string,Uint8Array>; sheets: RawSheet[]; sharedStrings: string[]; date1904?:boolean; }
+function formulaRange(reference:unknown, editableAnchor?:string):FormulaRange|undefined {
+  if (typeof reference !== 'string') return;
+  const [first, last = first] = reference.split(':');
+  const [firstColumn,firstRow] = cellParts(first), [lastColumn,lastRow] = cellParts(last);
+  if (!firstColumn || !firstRow || lastColumn < firstColumn || lastRow < firstRow || lastColumn > 16384 || lastRow > 1048576) return;
+  return { firstColumn, firstRow, lastColumn, lastRow, editableAnchor };
+}
+export function cellCanReceiveFormula(sheet:RawSheet, address:string):boolean {
+  const [column,row] = cellParts(address);
+  if (column < 1 || column > 16384 || row < 1 || row > 1048576) return false;
+  return !sheet.protectedRanges?.some(range => address !== range.editableAnchor &&
+    column >= range.firstColumn && column <= range.lastColumn && row >= range.firstRow && row <= range.lastRow);
+}
 function packagePath(target:string,files:Record<string,Uint8Array>):string{
   const resolve=(value:string)=>{const parts:string[]=[];for(const part of (value.startsWith('/')?value.slice(1):`xl/${value}`).replace(/\\/g,'/').split('/')){if(!part||part==='.')continue;if(part==='..'){if(!parts.length)throw new Error('La ruta de una hoja queda fuera del libro.');parts.pop();}else parts.push(part);}return parts.join('/');};
   const path=resolve(target);if(files[path])return path;try{return resolve(decodeURIComponent(target));}catch{throw new Error('La ruta de una hoja no es válida.');}
@@ -33,14 +47,24 @@ export function readRawWorkbook(data: ArrayBuffer | Uint8Array): RawBook {
     if(!files[path])throw new Error(`Falta la hoja ${s['@_name']}.`);
     const xml=strFromU8(files[path]); const document=parser.parse(xml).worksheet;
     const cells=new Map<string,RawCell>();const sharedMasters=new Map<string,{address:string;formula:string}>();const sharedCopies:{address:string;index:string}[]=[];
+    const protectedRanges:FormulaRange[]=[];
+    for (const merge of asArray(document?.mergeCells?.mergeCell)) {
+      const reference = merge['@_ref'];
+      const range = formulaRange(reference, typeof reference === 'string' ? reference.split(':')[0].replace(/\$/g,'').toUpperCase() : undefined);
+      if (range) protectedRanges.push(range);
+    }
     for (const row of asArray(document?.sheetData?.row)) for(const c of asArray(row.c)){
       const type=c['@_t']??'n'; const raw=xmlText(c.v); const value=type==='s'?sharedStrings[Number(raw)]??'':type==='inlineStr'?plainText(c.is):raw;
       const formula=c.f!==undefined?xmlText(c.f):undefined;
       cells.set(c['@_r'],{address:c['@_r'],value,formula,type});
       if(c.f?.['@_t']==='shared'){const index=String(c.f['@_si']);if(formula)sharedMasters.set(index,{address:c['@_r'],formula});else sharedCopies.push({address:c['@_r'],index});}
+      if (['array','dataTable'].includes(c.f?.['@_t'])) {
+        const range = formulaRange(c.f['@_ref']) ?? formulaRange(c['@_r']);
+        if (range) protectedRanges.push(range);
+      }
     }
     for(const copy of sharedCopies){const master=sharedMasters.get(copy.index);if(master){const [mc,mr]=cellParts(master.address),[cc,cr]=cellParts(copy.address);cells.get(copy.address)!.formula=shiftFormula(master.formula,cc-mc,cr-mr);}}
-    return {name:s['@_name'],path,cells,xml};
+    return {name:s['@_name'],path,cells,xml,protectedRanges};
   });
   return {files,sheets,sharedStrings,date1904:['1','true'].includes(String(workbook.workbookPr?.['@_date1904']??'').toLowerCase())};
 }

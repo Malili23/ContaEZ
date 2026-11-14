@@ -4,6 +4,7 @@ import type { ChatProposal, Mode, Operation, OperationType, Project } from '../s
 import { exportWorkbook } from '../src/io';
 import type { StudentPracticeResult } from '../src/io/student';
 import { repairStudentPractice } from '../src/studentProcessor';
+import { exportBytes } from '../src/platform';
 
 declare const Office: { onReady(callback: (info: { host?: string }) => void): void };
 declare const Excel: { run<T>(callback: (context: any) => Promise<T>): Promise<T>; createWorkbook?: (base64?: string) => Promise<void> | void };
@@ -54,9 +55,11 @@ $('practice-file').onchange=()=>{
 $('practice-review').onclick=()=>void runPractice(async()=>{
   if(!practiceFile)throw new Error('Primero elige tu práctica .xlsx.');practiceStatus('Revisando fórmulas y conexiones de tu práctica…');practiceOriginal=new Uint8Array(await practiceFile.arrayBuffer());practiceAnswers={};practiceResult=await repairStudentPractice(practiceOriginal.slice(),practiceFile.name);renderPractice();practiceStatus('Revisión lista. Puedes descargar una copia con los cambios y pendientes.');
 });
-$('practice-download').onclick=()=>{
-  if(!practiceFile||!practiceResult)return;const url=URL.createObjectURL(new Blob([practiceResult.data as BlobPart],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const link=document.createElement('a');link.href=url;link.download=practiceFile.name.replace(/\.xlsx$/i,'')+'__corregida.xlsx';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);practiceStatus('Copia preparada para descargar. El informe del Excel explica los cambios y lo que falta.');
-};
+$('practice-download').onclick=()=>void runPractice(async()=>{
+  if(!practiceFile||!practiceResult)return;
+  await exportBytes(practiceResult.data, practiceFile.name.replace(/\.xlsx$/i,'')+'__corregida.xlsx');
+  practiceStatus('Descarga solicitada. El informe del Excel explica los cambios y pendientes.');
+});
 $('practice-open').onclick=()=>void runPractice(async()=>{
   if(!practiceResult||!ready||typeof Excel==='undefined'||typeof Excel.createWorkbook!=='function')throw new Error('Para abrir la copia desde este botón, utiliza el complemento dentro de una versión compatible de Excel. También puedes descargarla.');await Excel.createWorkbook(asBase64(practiceResult.data));practiceStatus('Se solicitó abrir una copia en Excel. Guárdala con otro nombre para conservar tu original.');
 });
@@ -66,7 +69,15 @@ const clean = (value: unknown) => String(value ?? '').normalize('NFD').replace(/
 async function busy(id: string, action: () => Promise<void>) { const button = $(id) as HTMLButtonElement; button.disabled = true; try { await action(); } catch (error) { display('host-status', error instanceof Error ? error.message : String(error), true); } finally { button.disabled = false; } }
 async function selection(): Promise<{ values: unknown[][]; formulas: unknown[][]; address: string; rowIndex: number; columnIndex: number }> {
   if (!ready || typeof Excel === 'undefined') throw new Error('Abre este complemento dentro de Excel para leer la selección.');
-  return Excel.run(async context => { const range = context.workbook.getSelectedRange(); range.load(['values','formulas','address','rowIndex','columnIndex','cellCount']); await context.sync(); if (range.cellCount > 100000) throw new Error('Selecciona hasta 100,000 celdas por revisión.'); return { values: range.values, formulas: range.formulas, address: range.address, rowIndex: range.rowIndex, columnIndex: range.columnIndex }; });
+  return Excel.run(async context => {
+    const range = context.workbook.getSelectedRange();
+    range.load(['address','rowIndex','columnIndex','cellCount']);
+    await context.sync();
+    if (range.cellCount < 0 || range.cellCount > 100000) throw new Error('Selecciona hasta 100,000 celdas por revisión.');
+    range.load(['values','formulas']);
+    await context.sync();
+    return { values: range.values, formulas: range.formulas, address: range.address, rowIndex: range.rowIndex, columnIndex: range.columnIndex };
+  });
 }
 function columnName(index: number): string { let label = ''; for (let n=index+1;n>0;n=Math.floor((n-1)/26)) label=String.fromCharCode(65+(n-1)%26)+label; return label; }
 function renderPreview() {
@@ -116,9 +127,8 @@ $('confirm').onchange=()=>{($('export') as HTMLButtonElement).disabled=!(($('con
 $('export').onclick=()=>void busy('export',async()=>{
   if(!($('confirm') as HTMLInputElement).checked)throw new Error('Primero revisa y confirma la interpretación de los datos.');
   project={...project,operations:project.operations.map(o=>({...o,confirmed:true}))};const result=processProject(project);const bytes=await exportWorkbook(project,result);
-  let binary='';for(let offset=0;offset<bytes.length;offset+=8192)binary+=String.fromCharCode(...bytes.subarray(offset,offset+8192));
-  if(typeof Excel!=='undefined'&&typeof Excel.createWorkbook==='function')Excel.createWorkbook(btoa(binary));
-  else{const url=URL.createObjectURL(new Blob([bytes as BlobPart],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));const link=document.createElement('a');link.href=url;link.download='ContaEZ-reportes.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
+  if(ready&&typeof Excel!=='undefined'&&typeof Excel.createWorkbook==='function') await Excel.createWorkbook(asBase64(bytes));
+  else await exportBytes(bytes,'ContaEZ-reportes.xlsx');
   display('host-status',`Copia preparada con ${result.entries.length} asientos y ${result.issues.length} observaciones. Revisa la hoja Revisión ContaEZ.`);
 });
 $('chat').onclick=()=>{pending=proposeChat(project,($('message') as HTMLTextAreaElement).value);display('proposal',pending.message);$('apply').hidden=pending.kind==='clarification';};

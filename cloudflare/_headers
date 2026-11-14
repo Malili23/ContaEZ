@@ -1,0 +1,10 @@
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+/downloads/*
+  Cache-Control: public, max-age=3600
+/downloads/SHA256SUMS.txt
+  ! Cache-Control
+  Cache-Control: no-cache
+/version.json
+  Cache-Control: no-cache

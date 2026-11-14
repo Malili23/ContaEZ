@@ -49,6 +49,32 @@ describe('Contabilidad compartida por las tres modalidades',()=>{
     expect(r.entries.some(e=>e.operationId==='too-much')).toBe(false);
     expect(r.taxes.vatCollected).toBe('1280.00');
   });
+  it('liquida todo el IVA y la cuenta por cobrar al combinar cobros y devoluciones parciales',()=>{
+    const p=createProject('individual');
+    p.operations=[
+      operation('sale','sale','0.04',{paymentMethod:'credit'}),
+      operation('collect-a','collection','0.02',{relatedOperationId:'sale'}),
+      operation('return','sale_return','0.01',{relatedOperationId:'sale',paymentMethod:'credit'}),
+      operation('collect-b','collection','0.01',{relatedOperationId:'sale'}),
+    ];
+    const r=processProject(p);
+    expect(errors(p)).toEqual([]);
+    expect(r.taxes.vatCollected).toBe('0.01');
+    expect(r.trialBalance.find(row=>row.account.code==='209.01')?.balanceCredit).toBe('0.00');
+    expect(r.trialBalance.find(row=>row.account.code==='105.01')?.balanceDebit).toBe('0.00');
+  });
+  it('relaciona el cobro con la venta registrada aunque otro movimiento repita su identificador',()=>{
+    const p=createProject('individual');
+    p.operations=[
+      operation('sale','sale','100',{paymentMethod:'credit'}),
+      operation('sale','sale','200',{paymentMethod:'credit',counterpartyCode:'102.01'}),
+      operation('collect','collection','100',{relatedOperationId:'sale'}),
+    ];
+    const r=processProject(p);
+    expect(r.issues.some(i=>i.code==='DUPLICATE_OPERATION')).toBe(true);
+    expect(r.trialBalance.find(row=>row.account.code==='105.01')?.balanceDebit).toBe('0.00');
+    expect(r.bankReconciliation.ledgerBalance).toBe('116.00');
+  });
   it('devolver una venta conserva su costo original y devuelve el IVA correspondiente',()=>{
     const p=makeDemoProject('student');p.operations.push(operation('sale-return','sale_return','4000',{productId:'OMEGA',quantity:'20',relatedOperationId:'demo-sale'}));
     const r=processProject(p);
@@ -88,6 +114,18 @@ describe('Contabilidad compartida por las tres modalidades',()=>{
     expect(r.incomeStatement.revenue).toBe('0.00');expect(r.taxes.taxableRevenue).toBe('1000.00');expect(r.taxes.vatCollected).toBe('160.00');
     expect(r.trialBalance.find(t=>t.account.code==='105.01')?.balanceDebit).toBe('0.00');
   });
+  it('frena cobros de una factura anterior si los saldos de apertura son insuficientes aunque existan ventas nuevas',()=>{
+    const p=createProject('individual');
+    p.taxConfig.openingBalancesConfirmed=true;
+    p.operations=[
+      operation('old-sale','sale','100',{date:'2025-12-15',paymentMethod:'credit',referenceOnly:true,openingOutstandingBase:'100'}),
+      operation('new-sale','sale','100',{paymentMethod:'credit'}),
+      operation('collection','collection','100',{relatedOperationId:'old-sale'}),
+    ];
+    const r=processProject(p);
+    expect(r.entries.map(e=>e.operationId)).toEqual(['new-sale']);
+    expect(r.issues.find(i=>i.operationId==='collection')?.detail).toMatch(/saldo de apertura/);
+  });
   it('la devolución en efectivo no consume otra vez el saldo que sigue pendiente a crédito',()=>{
     const p=createProject('individual');p.taxConfig={...makeDemoProject('individual').taxConfig};
     p.operations=[operation('sale','sale','100',{date:'2026-01-02',paymentMethod:'credit'}),operation('collect','collection','40',{date:'2026-01-03',relatedOperationId:'sale'}),operation('cash-return','sale_return','20',{date:'2026-01-04',relatedOperationId:'sale'}),operation('credit-return','sale_return','60',{date:'2026-01-05',relatedOperationId:'sale',paymentMethod:'credit'})];
@@ -115,6 +153,38 @@ describe('Contabilidad compartida por las tres modalidades',()=>{
     const p=makeDemoProject('student');p.documents=[{id:'doc',name:'Apertura.xlsx',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',hash:'abc',importedAt:'2026-01-01',status:'pending'}];p.manualEntries[0].sourceIds=['doc'];
     const r=processProject(p);expect(r.entries.some(e=>e.kind==='opening')).toBe(false);expect(r.issues.some(i=>i.code==='ENTRY_SOURCE_PENDING')).toBe(true);
     p.documents[0].status='confirmed';expect(processProject(p).entries.some(e=>e.kind==='opening')).toBe(true);
+  });
+  it('distribuye la depreciación de un importe pequeño sin cargos negativos ni pérdida de centavos',()=>{
+    const p=createProject('business');
+    p.assets=[{id:'tiny',name:'Activo de prueba',type:'depreciation',cost:'0.07',residual:'0',usefulLifeMonths:14,startDate:'2026-01-01',accountCode:'150.01',expenseAccountCode:'603.01'}];
+    const monthlyCents=[];
+    for(let i=0;i<14;i++){
+      p.period=`${2026+Math.floor(i/12)}-${String((i%12)+1).padStart(2,'0')}`;
+      const result=processProject(p);
+      expect(result.issues.some(issue=>issue.code==='ENTRY_AMOUNT'||issue.code==='ENTRY_LINES')).toBe(false);
+      monthlyCents.push(Math.round(Number(result.incomeStatement.expenses)*100));
+    }
+    expect(monthlyCents.every(value=>value>=0)).toBe(true);
+    expect(monthlyCents.reduce((total,value)=>total+value,0)).toBe(7);
+  });
+  it('detecta importes bancarios inválidos y conserva una sola vez cada identificador',()=>{
+    const p=makeDemoProject('student');
+    p.bankTransactions.push({...p.bankTransactions[0]});
+    p.bankTransactions.push({...p.bankTransactions[1],id:'invalid',amount:' -500 '});
+    const r=processProject(p);
+    expect(r.bankReconciliation.difference).toBe('0.00');
+    expect(r.issues.filter(i=>i.severity==='error').map(i=>i.code)).toEqual(['DUPLICATE_BANK','BANK_AMOUNT']);
+    expect(()=>closeProject(p)).toThrow(/conciliación/);
+  });
+  it('no usa fracciones de centavo en el mayor ni cuenta dos veces un código repetido',()=>{
+    const p=makeDemoProject('business');
+    p.accounts.push({...p.accounts.find(a=>a.code==='102.01')!});
+    p.manualEntries.push({id:'subcent',date:'2026-01-20',concept:'Ajuste de prueba',kind:'adjustment',sourceIds:[],lines:[{id:'a',accountCode:'102.01',debit:'0.005',credit:'0'},{id:'b',accountCode:'301.01',debit:'0',credit:'0.005'}]});
+    const r=processProject(p);
+    expect(r.entries.some(e=>e.id==='subcent')).toBe(false);
+    expect(r.trialBalance.filter(row=>row.account.code==='102.01')).toHaveLength(1);
+    expect(r.bankReconciliation.ledgerBalance).toBe('109280.00');
+    expect(r.issues.map(i=>i.code)).toEqual(expect.arrayContaining(['DUPLICATE_ACCOUNT','ENTRY_AMOUNT']));
   });
 });
 
@@ -149,6 +219,17 @@ describe('Papeles de trabajo fiscales 2026',()=>{
     const p=makeDemoProject('individual');delete p.operations[1].taxDeductible;
     expect(processProject(p).taxes.status).toBe('incomplete');
     expect(processProject(p).taxes.isr).toBeNull();
+  });
+  it('un documento sin revisar impide publicar el borrador fiscal y usar su operación',()=>{
+    const p=makeDemoProject('individual');
+    p.documents=[{id:'invoice',name:'Factura.xml',mime:'application/xml',hash:'hash',importedAt:'2026-01-01',status:'pending'}];
+    p.operations[0].sourceIds=['invoice'];
+    const pending=processProject(p);
+    expect(pending.taxes.status).toBe('incomplete');
+    expect(pending.taxes.isr).toBeNull();
+    expect(pending.taxes.taxableRevenue).toBe('0.00');
+    p.documents[0].status='confirmed';
+    expect(processProject(p).taxes.isr).toBe('1761.22');
   });
 });
 

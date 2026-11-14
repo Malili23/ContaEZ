@@ -1,0 +1,69 @@
+:root {
+  color-scheme: light;
+  font-family: 'Segoe UI', Arial, system-ui, sans-serif;
+  color: #153b2d;
+  background: #f6f7f1;
+  --ink: #153b2d;
+  --text: #4a6153;
+  --green: #17533d;
+  --line: #d6ded1;
+  --paper: #fff;
+}
+* { box-sizing: border-box; }
+body { margin: 0; line-height: 1.6; }
+a { color: var(--green); }
+a:focus-visible { outline: 3px solid #a68745; outline-offset: 4px; }
+.wrap { width: min(1110px, calc(100% - 48px)); margin-inline: auto; }
+.skip { position: absolute; left: 16px; top: -80px; padding: 8px 14px; background: var(--paper); }
+.skip:focus { top: 8px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-block: 22px; border-bottom: 1px solid var(--line); }
+.brand { display: inline-flex; align-items: center; font-size: 24px; font-weight: 750; text-decoration: none; letter-spacing: -.8px; }
+.brand > span:last-child { color: #617b67; }
+.brand-icon { border-radius: 7px; width: 30px; height: 30px; margin-right: 8px; display: grid; place-items: center; color: white; background: var(--green); font-size: 18px; }
+nav { display: flex; flex-wrap: wrap; gap: 12px 25px; }
+nav a { font-size: .92rem; font-weight: 620; text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+.hero { padding: 70px 0 62px; display: grid; grid-template-columns: 1.07fr .93fr; gap: clamp(22px, 7vw, 86px); align-items: center; }
+.eyebrow { color: #48634f; font-size: .79rem; letter-spacing: .11em; text-transform: uppercase; font-weight: 700; }
+h1, h2, h3 { line-height: 1.13; font-weight: 730; margin: 0; }
+h1 { font-size: clamp(2.5rem, 6.3vw, 4.15rem); letter-spacing: -.06em; max-width: 12ch; }
+h2 { font-size: clamp(1.68rem, 3.4vw, 2.35rem); letter-spacing: -.04em; }
+h3 { font-size: 1.22rem; }
+.lead { font-size: 1.11rem; color: var(--text); margin: 18px 0 24px; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.button { padding: 10px 15px; min-height: 44px; display: inline-flex; align-items: center; border: 1px solid var(--green); border-radius: 8px; font-size: .91rem; font-weight: 680; text-decoration: none; }
+.primary { background: var(--green); color: white; }
+.primary:hover { background: #113f2f; }
+.secondary { background: var(--paper); }
+.secondary:hover { background: #e6efe7; }
+.meta, .section-note { color: var(--text); font-size: .9rem; }
+.example, .card, .release { border: 1px solid var(--line); border-radius: 12px; background: var(--paper); padding: 20px; }
+.example { box-shadow: 0 12px 35px #153b2d0c; }
+.example-title, .example-formula { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.example-title { font-size: .9rem; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+.example-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 18px; }
+.example-inputs > div, .example-formula code { padding: 10px; border-radius: 6px; background: #eef3eb; overflow-wrap: anywhere; }
+.example-inputs small { display: block; color: var(--text); }
+.example p, .card p, .release p, .about p { color: var(--text); }
+.example-formula code { flex: 1; }
+.block { border-top: 1px solid var(--line); padding: 36px 0; }
+.platforms { margin-top: 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.card { display: flex; flex-direction: column; align-items: flex-start; }
+.card p { flex: 1; }
+.small-link { font-size: .86rem; margin-top: 8px; }
+.release-list { display: grid; gap: 9px; }
+.release { display: grid; grid-template-columns: minmax(0, 1fr) 1fr; gap: 12px 22px; align-items: center; padding: 14px 18px; }
+.release p { margin: 4px 0 0; font-size: .9rem; }
+.release-files { display: flex; flex-wrap: wrap; gap: 4px 18px; justify-content: flex-end; }
+.release-files a { font-size: .89rem; }
+.about p { max-width: 75ch; }
+.footer { border-top: 1px solid var(--line); padding: 24px 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; font-size: .88rem; }
+@media (max-width: 740px) {
+  .hero, .platforms, .release { grid-template-columns: 1fr; }
+  .hero { padding: 42px 0; }
+  .release-files { justify-content: flex-start; }
+}
+@media (max-width: 385px) {
+  .wrap { width: calc(100% - 28px); }
+  .top { align-items: flex-start; flex-direction: column; gap: 10px; }
+}

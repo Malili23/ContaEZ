@@ -1,22 +1,19 @@
-# Verificación de ContaEZ 0.3.0
+# Verificación de ContaEZ 0.4.0
 
-- Compilación TypeScript y Vite: aprobada.
-- 58 pruebas automatizadas JavaScript/TypeScript: aprobadas.
-- 6 pruebas nativas Rust: aprobadas, incluyendo cifrado autenticado y almacén seguro real de Windows.
-- Prácticas sobre el libro original: siete pruebas nuevas comprueban vínculos entre hojas, conservación de datos, estilos y partes del archivo; rechazan referencias circulares y parciales con signo ambiguo. Las dos comprobaciones privadas adicionales con los ocho libros y una copia de RGE también aprobaron; se omiten por defecto cuando esos originales no están disponibles.
-- Interfaz: se comprobaron las tres modalidades con datos ficticios, captura de un gasto, confirmación de una propuesta de chat, cambio PEPS a promedio y recálculo de resultados.
-- Persistencia: proyectos y documento de prueba conservados después de recargar la vista web.
-- OCR local: recibo sintético leído con subtotal, IVA y total correctos usando los recursos incluidos.
-- Excel Windows: una edición de gasto actualizó resultado y balance; 292 valores numéricos de fórmulas coincidieron con la exportación independiente esperada.
-- Ocho prácticas con el nuevo motor sobre el mismo libro: originales intactos, conservación de estilos/componentes y revisión repetida sin cambios innecesarios. Las ocho copias actuales abren y recalculan en Excel Windows sin añadir errores de fórmula. Las cuentas, fuentes y reportes no identificables quedan pendientes. Una corrupción detectada al insertar referencias con $ en celdas vacías se corrigió y tiene prueba de regresión.
-- Dependencias JavaScript: auditoría sin vulnerabilidades conocidas en el informe ejecutado.
+- TypeScript y compilación de producción: aprobados.
+- 85 pruebas automatizadas JavaScript/TypeScript: aprobadas. Las dos pruebas privadas adicionales de los ocho libros y una copia de RGE también aprobaron; se omiten por defecto sin esos originales.
+- Nuevas regresiones: calendario Excel Mac 1904, fórmulas compartidas, funciones con números en su nombre, ciclos con rangos amplios, reemplazo de fórmulas vacías y conservación de texto dentro de fórmulas.
+- La balanza distingue apertura, movimientos y cierre. Los bloques de ajustes ambiguos permanecen pendientes; no se rellenan a partir de un diario cuya relación no se puede comprobar.
+- Guardado: se comprobaron lecturas interrumpidas, aperturas bloqueadas y acceso restringido a almacenamiento anterior. Los errores no borran ese respaldo ni crean proyectos ficticios.
+- Revisión en segundo plano: fallos al iniciar, enviar o recibir el libro y tiempos agotados liberan sus recursos. Los originales y modelos siguen disponibles.
+- Interfaz web: carga de práctica y modelo, instrucción Diario!C2, propuesta, confirmación, descarga y conservación tras recarga. Una nota nueva pendiente bloquea la descarga hasta volver a revisar.
+- Excel Windows recalculó esa descarga: A2=100, B2=16 y C2=116 con SUM(A2:B2). No se copiaron los importes 999 y 1 del modelo.
+- Windows nativo: ejecutable 0.4.0, importación de práctica y modelo, confirmación de fórmula y descarga mediante diálogo vinculado a la app comprobados. El archivo guardado conserva 100, 16 y la fórmula SUM(A2:B2).
+- Ocho copias nuevas generadas por el motor de la app: 128 cambios y 351 observaciones pendientes, sin alterar sus originales. Excel Windows abrió y recalculó las ocho: cero errores de fórmula nuevos y cero ciclos nuevos. Los originales tenían tres errores de fórmula; las copias conservan uno previo sin fuente identificable.
+- PDF: lector y trabajador de la variante legacy, para las API de Safari correspondientes a macOS 14. ChatGPT separa copiar la consulta de abrir el enlace para evitar ventanas emergentes bloqueadas.
 
-La interfaz de prácticas se comprobó además con carga real, aclaración de ejercicio, guardado, recarga y descarga de una copia del mismo Excel. La revisión se ejecuta aparte de la interfaz para mantener la pantalla disponible. El libro completo descargado abrió y recalculó en Excel Windows sin errores de fórmula; conserva pendientes sobre cuentas y reportes cuya fuente no se puede determinar.
+Los informes de las prácticas son privados. El repositorio publica únicamente pruebas sintéticas. Los pendientes pueden ser cuentas, fuentes, datos o instrucciones que no se pueden inferir con seguridad; no se inventan cifras para cuadrar el libro.
 
-El flujo con contexto se comprobó desde la interfaz: carga de práctica y modelo, indicación Diario!C2, propuesta sin cambios automáticos, confirmación y descarga. Excel Windows recalculó el archivo descargado: base 100, IVA 16 y total 116, conservando las cifras de la práctica aunque el modelo tenía otras cantidades. Se añadieron pruebas para diseño incompatible, ciclos, vínculos externos, datos capturados, propuestas obsoletas y reutilización del original al enviarlo a un trabajador.
+El estado exacto de Mac, sus pruebas de arquitectura, arranque y Llavero se documenta en MAC.md y en el flujo público de GitHub. Compilar y arrancar en CI no sustituye la prueba visual de importación, OCR, descarga y autorizaciones en un Mac de uso diario.
 
-El guardado nativo se comprobó con una descarga real. Abre Descargas y mantiene una sola ventana de guardado vinculada a la app.
-
-Estos resultados cubren los escenarios comprobados. No equivalen a una auditoría contable integral, cobertura de todas las NIF o verificación universal de cualquier archivo.
-
-Pendientes externos: pruebas de autorización con cuentas reales de ChatGPT/Google, validación del complemento en Excel, perfil CONTPAQi, ejecución en Mac M1 y firma/notarización de distribución. El código y configuración de compilación para macOS ARM64 están incluidos.
+Siguen pendientes: firma de editor Windows, Developer ID y notarización Apple, autorización con cuentas reales de ChatGPT y Google, validación del complemento dentro de Excel y perfil comprobado de CONTPAQi. No se afirma cobertura integral de todas las NIF ni certificación fiscal.

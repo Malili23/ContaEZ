@@ -1,5 +1,5 @@
 import { auditRawWorkbook, type WorkbookAudit, type WorkbookFinding } from './audit';
-import { appendReviewSheet, cellParts, columnName, escapeXml, readRawWorkbook, referenceKeys, updateCellFormula, writeRawWorkbook, normalizeFormulaFunctions, brokenReferenceCount, replaceBrokenFormulaReference, type RawBook, type RawCell, type RawSheet } from './workbook';
+import { appendReviewSheet, cellParts, columnName, cellCanReceiveFormula, escapeXml, readRawWorkbook, referenceKeys, updateCellFormula, writeRawWorkbook, normalizeFormulaFunctions, brokenReferenceCount, replaceBrokenFormulaReference, type RawBook, type RawCell, type RawSheet } from './workbook';
 
 export interface StudentQuestion { id:string; title:string; explanation:string; placeholder:string; }
 export interface StudentConnection { source:string; target:string; description:string; }
@@ -11,7 +11,7 @@ interface Table { sheet:RawSheet; row:number; start:number; end:number; account:
 interface Proposal { sheet:RawSheet; address:string; formula?:string; source?:string; message:string; code:string; suggestion?:string; }
 const norm=(s:string)=>s.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
 const quote=(s:string)=>`'${s.replace(/'/g,"''")}'`;
-const criterion=(s:string)=>s.replace(/~/g,'~~').replace(/\*/g,'~*').replace(/\?/g,'~?').replace(/"/g,'""');
+const criterion=(s:string)=>`${/^[<>=]/.test(s)?'=':''}${s.replace(/~/g,'~~').replace(/\*/g,'~*').replace(/\?/g,'~?').replace(/"/g,'""')}`;
 const at=(s:RawSheet,c:number,r:number)=>s.cells.get(`${columnName(c)}${r}`);
 const blank=(c:RawCell|undefined)=>!c||c.formula===undefined&&c.value.trim()==='';
 const amount=(c:RawCell|undefined)=>!!c&&(!!c.formula||c.type!=='s'&&c.type!=='inlineStr'&&c.value!==''&&Number.isFinite(Number(c.value)));
@@ -23,6 +23,11 @@ const isJournal=(s:RawSheet)=>/^(?:diario|libro diario|polizas?(?: de)? (?:diari
 const isBalance=(s:RawSheet)=>/bala[nz]*[az]?[ao]? de comprobacion|balanza|balaza/.test(norm(s.name));
 const isMajor=(s:RawSheet)=>/mayor/.test(norm(s.name));
 const isReport=(s:RawSheet)=>/balance general|estado[s]? de resultado/.test(norm(s.name));
+function lastRow(sheet:RawSheet):number {
+  let max = 1;
+  for (const address of sheet.cells.keys()) max = Math.max(max,cellParts(address)[1]);
+  return max;
+}
 
 /** Add one cell without round-tripping the worksheet, drawings, styles or other parts. */
 function setFormula(sheet:RawSheet,address:string,formula:string){
@@ -49,7 +54,7 @@ function tableEnd(sheet:RawSheet,row:number,account:number,limit:number){
 function journals(book:RawBook):Journal[]{
   const found:Journal[]=[];
   for(const sheet of book.sheets.filter(isJournal)){
-    const max=Math.max(1,...[...sheet.cells.keys()].map(a=>cellParts(a)[1]));
+    const max=lastRow(sheet);
     for(let row=1;row<=Math.min(max,100);row++){
       const cells=[...sheet.cells.values()].filter(c=>cellParts(c.address)[1]===row);
       const deb=cells.filter(c=>sideHeader(c.value)==='debit'),cre=cells.filter(c=>sideHeader(c.value)==='credit');
@@ -152,7 +157,7 @@ function sourceFormula(all:Source[],name:string,side:Side,code?:string):{formula
 function balanceTables(book:RawBook):Table[]{
   const found:Table[]=[];
   for(const sheet of book.sheets.filter(s=>isBalance(s)||isMajor(s))){
-    const max=Math.max(1,...[...sheet.cells.keys()].map(a=>cellParts(a)[1]));
+    const max=lastRow(sheet);
     for(let row=1;row<=Math.min(max,150);row++){
       const cells=[...sheet.cells.values()].filter(c=>cellParts(c.address)[1]===row);
       const sideCells=cells.filter(c=>sideHeader(c.value));if(sideCells.length<2)continue;
@@ -180,6 +185,14 @@ function plan(book:RawBook):Proposal[]{
     const [col,totalRow]=cellParts(cell.address),start=Number(m[2]),end=Number(m[3]);if(totalRow!==end+1)continue;
     const right=at(sheet,col+1,totalRow)?.formula?.replace(/\$/g,'');if(right!==`SUM(${columnName(col+1)}${start}:${columnName(col+1)}${end})`)continue;
     const title=at(sheet,col,start-1);if(!title||title.formula||!title.value.trim())continue;
+    const targets = [col, col + 1].map(column => `${columnName(column)}${start}`);
+    if (targets.some(address => !cellCanReceiveFormula(sheet,address))) {
+      for (const address of targets) {
+        if (!blank(sheet.cells.get(address))) continue;
+        add({sheet,address,code:'STUDENT_ACCOUNT_LAYOUT',message:`El bloque de ${title.value.trim()} no admite una conexión individual.`,suggestion:'Revisa las celdas combinadas, matriciales o de una tabla de datos en Excel antes de completar el mayor.'});
+      }
+      continue;
+    }
     const occupied=[...sheet.cells.values()].some(c=>{const [cc,rr]=cellParts(c.address);return (cc===col||cc===col+1)&&rr>=start&&rr<=end&&!blank(c);});if(occupied)continue;
     for(const [side,column]of [['debit',col],['credit',col+1]] as const){const f=sourceFormula(ss,title.value,side);add({sheet,address:`${columnName(column)}${start}`,formula:f?.formula,source:f?.source,code:'STUDENT_MISSING_LINK',message:`Mayor de ${title.value.trim()}: falta el vínculo ${side==='debit'?'deudor':'acreedor'} con las pólizas del libro.`,suggestion:'Indicar el rango fuente de esta cuenta y de este lado. Un importe en Parcial necesita una relación comprobable con Deudor o Acreedor.'});}
   }
@@ -229,11 +242,16 @@ function plan(book:RawBook):Proposal[]{
     }
     if(!candidates&&![...sheet.cells.values()].some(c=>c.formula&&/!/.test(c.formula)))add({sheet,address:'',code:'STUDENT_REPORT_LAYOUT',message:'El estado financiero no tiene vínculos con las cuentas de la balanza que puedan reconstruirse inequívocamente.',suggestion:'Indicar el rango de nombres de cuentas y la celda o columna de importes en este reporte. No se certifica su cobertura porque sus sumas coincidan.'});
   }
-  const safe=proposals.map(p=>p.formula&&!formulaSourcesSafe(book,p.sheet,p.address,p.formula)?{...p,formula:undefined,suggestion:'La conexión propuesta depende de un error o produciría un ciclo; revisa primero sus fuentes. No se insertó la fórmula.'}:p);
+  const safe=proposals.map(p=>{
+    if (p.address && !cellCanReceiveFormula(p.sheet, p.address)) return {...p,formula:undefined,suggestion:'Identifica una celda fuera del bloque combinado, matricial o de tabla de datos para aplicar la conexión.'};
+    if (p.formula && !formulaSourcesSafe(book,p.sheet,p.address,p.formula)) return {...p,formula:undefined,suggestion:'La conexión propuesta depende de un error o produciría un ciclo; revisa primero sus fuentes. No se insertó la fórmula.'};
+    return p;
+  });
   let changed=true;while(changed){changed=false;for(const proposal of safe)if(proposal.formula&&referenceKeys(proposal.formula,proposal.sheet.name,book).some(key=>safe.some(source=>`${source.sheet.name}!${source.address}`===key&&!source.formula))){proposal.formula=undefined;proposal.suggestion='Falta completar una de las celdas fuente de esta conexión; no se usará su espacio vacío como saldo cero.';changed=true;}}
   return safe;
 }
 function formulaSourcesSafe(book:RawBook,sheet:RawSheet,address:string,formula:string):boolean{
+  if (!cellCanReceiveFormula(sheet, address)) return false;
   const original=sheet.cells.get(address),target=`${sheet.name}!${address}`;
   sheet.cells.set(address,{address,value:'',type:'n',formula});
   try{
@@ -256,15 +274,12 @@ function validatedReference(value:string,book:RawBook,target:string):string|unde
   if(c<1||cc>16384||r<1||rr>1048576||cc<c||rr<r||(cc-c+1)*(rr-r+1)>50_000)return;
   if(![...sheet.cells.values()].some(x=>{const [xc,xr]=cellParts(x.address);return xc>=c&&xc<=cc&&xr>=r&&xr<=rr&&!blank(x);}))return;
   const ref=`${quote(sheet.name)}!${m[3].toUpperCase()}${m[4]?`:${m[4].toUpperCase()}`:''}`;
-  const refs=referenceKeys(ref,sheet.name,book);if(refs.includes(target))return;
-  // Do not accept an answer that creates a cycle through existing formulas.
-  const seen=new Set<string>();const reaches=(key:string):boolean=>{if(key===target)return true;if(seen.has(key)||seen.size>10_000)return false;seen.add(key);const split=key.lastIndexOf('!'),s=book.sheets.find(x=>x.name===key.slice(0,split)),cell=s?.cells.get(key.slice(split+1));return !!s&&!!cell?.formula&&referenceKeys(cell.formula,s.name,book).some(reaches);};
-  return refs.some(reaches)?undefined:ref;
+  return referenceKeys(ref,sheet.name,book).includes(target)?undefined:ref;
 }
 function addReview(book:RawBook,rows:string[][]){
   const existing=book.sheets.find(s=>s.name==='Revisión ContaEZ'||/^cambios(?: contaez)?$/i.test(s.name));
   if(!existing){appendReviewSheet(book,rows);return;}
-  let last=Math.max(0,...[...existing.cells.keys()].map(a=>cellParts(a)[1]));
+  let last=existing.cells.size?lastRow(existing):0;
   const content=rows.map(row=>{last++;return `<row r="${last}">${row.map((value,col)=>`<c r="${columnName(col+1)}${last}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`).join('')}</row>`;}).join('');
   existing.xml=existing.xml.replace('</sheetData>',()=>`${content}</sheetData>`).replace(/<dimension\b[^>]*\/>/,`<dimension ref="A1:G${last}"/>`);
 }
@@ -297,7 +312,8 @@ export async function repairStudentPractice(data:ArrayBuffer|Uint8Array,filename
   }
   const after=enrich(auditRawWorkbook(book,filename),plan(book).map(finding)),pending=after.findings.filter(f=>f.severity!=='info');
   for(const f of pending){
-    if((f.code==='BROKEN_REFERENCE'&&(f.original?.match(/#REF!/gi)?.length??0)===1)||f.code==='STUDENT_MISSING_LINK')questions.push({id:f.id,title:`¿Cuál es la fuente de ${f.sheet}!${f.cell}?`,explanation:`${f.message} ${f.suggestion}${answers[f.id]?' La respuesta anterior no identifica una referencia válida o produciría un ciclo.':''}`,placeholder:'Diario!D8 o \'Balanza de comprobación\'!D6:D10'});
+    const location=book.sheets.find(s=>s.name===f.sheet);
+    if(location&&cellCanReceiveFormula(location,f.cell)&&((f.code==='BROKEN_REFERENCE'&&brokenReferenceCount(f.original??'')===1)||f.code==='STUDENT_MISSING_LINK'))questions.push({id:f.id,title:`¿Cuál es la fuente de ${f.sheet}!${f.cell}?`,explanation:`${f.message} ${f.suggestion}${answers[f.id]?' La respuesta anterior no identifica una referencia válida o produciría un ciclo.':''}`,placeholder:'Diario!D8 o \'Balanza de comprobación\'!D6:D10'});
     else if(f.code==='PERIOD_CONFLICT'){const sheet=book.sheets.find(s=>s.name===f.sheet),cell=sheet?.cells.get(f.cell);if(sheet&&cell&&periodHeader(sheet,cell,periodJournals))questions.push({id:f.id,title:`Confirma el ejercicio del encabezado ${f.sheet}!${f.cell}`,explanation:'Indica el año correcto. Solo se actualizarán encabezados con mes y año en las primeras ocho filas; las fechas de las operaciones se conservan.',placeholder:'2026'});}
   }
   if(changes.length||!book.sheets.some(s=>s.name==='Revisión ContaEZ'||/^cambios(?: contaez)?$/i.test(s.name)))addReview(book,[['Estado','Hoja','Celda','Hallazgo','Antes','Después / acción','Alcance'],...changes.map(f=>['Conectado / corregido',f.sheet,f.cell,f.message,f.original??'',f.replacement??'','Fórmula en el libro original; requiere recálculo en Excel']),...pending.map(f=>['Pendiente',f.sheet,f.cell,f.message,f.original??'',f.suggestion,'No certificado']),['Información','','','Se conservan hojas, datos capturados y componentes del archivo.','','','Las coincidencias de totales no certifican cobertura ni exactitud integral.']]);

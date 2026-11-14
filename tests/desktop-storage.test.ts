@@ -27,6 +27,29 @@ describe('Persistencia de proyectos',()=>{
     expect((await loadProjects())[0].name).toBe('Última revisión');
     await Promise.all([saveProject({...original,name:'En curso'}),deleteProject(original.id)]);expect(await loadProjects()).toEqual([]);
   });
+  it('abre un espacio después de que se escriben los cambios de la pantalla anterior',async()=>{
+    vi.stubGlobal('window',{__TAURI_INTERNALS__:{}});
+    const {invoke}=await import('@tauri-apps/api/core');
+    const project=createProject('individual','Cambio al navegar');
+    let finishWrite!:()=>void;
+    let persisted:typeof project|undefined;
+    vi.mocked(invoke).mockImplementation(async(command,args)=>{
+      if(command==='project_save'){
+        await new Promise<void>(resolve=>{finishWrite=resolve;});
+        persisted=(args as {project:typeof project}).project;
+      }
+      return command==='projects_load'?(persisted?[persisted]:[]):undefined as never;
+    });
+    const {loadProjects,saveProject}=await import('../src/platform');
+    const saving=saveProject(project);
+    await vi.waitFor(()=>expect(finishWrite).toBeTypeOf('function'));
+    const opening=loadProjects();
+    await Promise.resolve();
+    expect(invoke).not.toHaveBeenCalledWith('projects_load',undefined);
+    finishWrite();
+    await saving;
+    await expect(opening).resolves.toEqual([project]);
+  });
   it('conserva un almacenamiento anterior dañado y rechaza otra jurisdicción',async()=>{
     memory.set(legacyKey,'{incompleto');const {loadProjects,saveProject}=await import('../src/platform');
     await expect(loadProjects()).rejects.toThrow('conservó intacto');expect(memory.get(legacyKey)).toBe('{incompleto');

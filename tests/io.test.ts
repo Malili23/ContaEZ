@@ -27,6 +27,26 @@ describe('Revisión conservadora de libros',()=>{
   });
 });
 describe('Documentos y bases fiscales',()=>{
+  it('importa cada identificador de operación una vez y valida un asiento completo con su fecha y tipo',async()=>{
+    const book = new ExcelJS.Workbook();
+    const operations = book.addWorksheet('Operaciones');
+    operations.getCell('A4').value='ID';
+    operations.addRows([['igual','2026-01-05','sale','Primera',100,.16,'bank'],['igual','2026-01-06','sale','Repetida',300,.16,'bank']]);
+    const diary = book.addWorksheet('Diario');
+    diary.getRow(4).values=['Fecha','Tipo póliza','Código','Cuenta','Concepto','Parcial','Debe','Haber','Asiento ID','Operación ID'];
+    diary.addRows([
+      ['2026-01-07','adjustment','102.01','','Ajuste','',100,0,'man-1'],
+      ['2026-01-07','adjustment','301.01','','Ajuste','',0,100,'man-1'],
+      ['2026-01-07','diary','102.01','','Asiento incompleto','',100,0,'man-2'],
+      ['2026-01-07','diary','999.99','','Asiento incompleto','',0,100,'man-2'],
+      ['2026-01-07','diary','301.01','','Asiento incompleto','',0,100,'man-2'],
+    ]);
+    const data = new Uint8Array(await book.xlsx.writeBuffer());
+    const result=await importFile(new File([data],'Reimportación.xlsx'),createProject('business'));
+    expect(result.operations).toMatchObject([{id:'igual',amount:'100'}]);
+    expect(result.entries).toMatchObject([{id:'man-1',date:'2026-01-07',kind:'adjustment',lines:[{debit:'100'},{credit:'100'}]}]);
+    expect(result.issues.map(f=>f.code)).toEqual(expect.arrayContaining(['OPERATION_REVISION','XLSX_MANUAL_PENDING']));
+  });
   it('separa subtotal e IVA y deja la propuesta pendiente, sin gravar de nuevo el total',()=>{
     const p=createProject('business');p.rfc='AAA010101AAA';const xml=`<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4" Version="4.0" Fecha="2026-01-10T12:00:00" TipoDeComprobante="I" SubTotal="1000.00" Total="1160.00" MetodoPago="PPD"><cfdi:Emisor Rfc="AAA010101AAA"/><cfdi:Receptor Rfc="BBB010101BBB"/><cfdi:Conceptos><cfdi:Concepto Descripcion="Venta"/></cfdi:Conceptos><cfdi:Impuestos><cfdi:Traslados><cfdi:Traslado Impuesto="002" TasaOCuota="0.160000" Importe="160.00"/></cfdi:Traslados></cfdi:Impuestos></cfdi:Comprobante>`;const result=parseCfdi(xml,p,source());expect(result.operations[0]).toMatchObject({amount:'1000.00',vatRate:'0.160000',confirmed:false,paymentMethod:'credit',type:'sale'});
   });
@@ -35,6 +55,23 @@ describe('Documentos y bases fiscales',()=>{
   it('no interpreta importes USD como MXN',()=>{const result=parseCfdi('<Comprobante Version="4.0" TipoDeComprobante="I" Moneda="USD" SubTotal="100" Total="116"><Emisor Rfc="AAA"/><Receptor Rfc="BBB"/></Comprobante>',createProject('business'),source());expect(result.operations).toHaveLength(0);expect(result.issues.some(i=>i.code==='CFDI_CURRENCY')).toBe(true);});
 });
 describe('Exportación compartida',()=>{
+  it('distingue costo, base y total iguales por su origen y concilia solo el periodo exportado',async()=>{
+    const p=createProject('business');
+    p.inventoryInitial=[{id:'stock',productId:'P',date:'2026-01-01',quantity:'1',unitCost:'100'}];
+    p.operations=[{id:'venta',type:'sale',date:'2026-01-05',description:'Venta al costo',productId:'P',quantity:'1',amount:'100',vatRate:'0.16',paymentMethod:'bank',sourceIds:[],confirmed:true}];
+    p.bankTransactions=[{id:'vigente',date:'2026-01-05',description:'Venta',amount:'116',matchedOperationId:'venta'},{id:'otro-mes',date:'2026-02-01',description:'De otro mes',amount:'300'}];
+    const result=processProject(p);
+    const workbook=readRawWorkbook(await exportWorkbook(p,result));
+    const journal=workbook.sheets.find(s=>s.name==='Diario')!;
+    const salesRow=[...journal.cells.values()].find(c=>c.address.startsWith('C')&&c.value==='401.01')!.address.slice(1);
+    const costRow=[...journal.cells.values()].find(c=>c.address.startsWith('C')&&c.value==='501.01')!.address.slice(1);
+    expect(journal.cells.get(`H${salesRow}`)?.formula).toContain("'Operaciones'!E5");
+    expect(journal.cells.get(`G${costRow}`)?.formula).toBe("'Inventario'!I6");
+    const bank=workbook.sheets.find(s=>s.name==='Conciliación Bancaria')!;
+    expect([...bank.cells.values()].some(c=>c.value==='De otro mes')).toBe(false);
+    expect(bank.cells.get('C8')?.formula).toBe('C11+SUM(C5:C5)');
+    expect(bank.cells.get('C8')?.value).toBe('116');
+  });
   it('vincula Diario→Mayor→Balanza→Estados, con cachés consistentes y sin errores de referencia',async()=>{
     const p=makeDemoProject('business'),result=processProject(p);const data=await exportWorkbook(p,result);const b=readRawWorkbook(data);expect(b.sheets).toHaveLength(16);const balance=b.sheets.find(s=>s.name==='Balance general')!;expect(balance.cells.get('B5')?.value).toBe(String(Number(result.balanceSheet.assets)));expect(balance.cells.get('B8')?.formula).toContain('Estados de resultados');const mayor=b.sheets.find(s=>s.name==='Esquemas de mayor')!;expect(mayor.cells.get('C5')?.formula).toContain('Diario');const audit=await auditWorkbook(data,'exportado.xlsx');expect(audit.findings.filter(f=>f.code==='BROKEN_REFERENCE'||f.code==='CIRCULAR_REFERENCE')).toHaveLength(0);
     const inventory=b.sheets.find(s=>s.name==='Inventario')!;expect(inventory.cells.get('G5')?.formula).toBe('0+E5-F5');expect(inventory.cells.get('J5')?.formula).toBe('0+IF(E5>0,I5,-I5)');

@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { commitPracticeRecord, createPracticeTaskGate } from '../src/StudentWorkspace';
+import { createProject } from '../src/core';
+import { commitPracticeRecord, createPracticeTaskGate, restorePracticeInputs } from '../src/StudentWorkspace';
 
 it('impide otra acción durante todo un lote, incluso entre dos archivos',async()=>{
  const gate=createPracticeTaskGate();let continueBatch!:()=>void;
@@ -38,4 +39,20 @@ it('conserva la versión visible al fallar el guardado y solo publica un reinten
  expect(current).toBe(visible);expect(publish).not.toHaveBeenCalled();
  const retry=vi.fn(async()=>{});await commitPracticeRecord({...visible,revision:2},retry,publish);
  expect(current.revision).toBe(2);expect(publish).toHaveBeenCalledOnce();
+});
+
+it('restaura el contexto en otra práctica sin reutilizar una copia o revisión posiblemente obsoleta',()=>{
+ const project=createProject('student','Ejercicio de prueba');
+ const studentPractice={
+  fileName:'Ejercicio.xlsx',original:'T3JpZ2luYWw=',revised:'RGVzYWN0dWFsaXphZG8=',
+  attachments:[{name:'Contexto.txt',data:'Tm90YQ==',text:'Nota'}],contextNote:'Diario!C2',
+  answers:{revision:'Diario!B2'},acceptedContextIds:['context:validar'],messages:[],
+  pending:[{message:'Pendiente anterior'}],sheetNames:['Hoja anterior']
+ };
+ const restored=restorePracticeInputs({...project,studentPractice});
+ expect(restored.id).not.toBe(project.id);
+ expect(restored.studentPractice).toMatchObject({original:studentPractice.original,attachments:studentPractice.attachments,contextNote:studentPractice.contextNote,answers:studentPractice.answers,acceptedContextIds:studentPractice.acceptedContextIds});
+ expect(restored.studentPractice?.revised).toBeUndefined();
+ expect(restored.studentPractice?.pending).toEqual([]);
+ expect(restored.studentPractice?.sheetNames).toEqual([]);
 });

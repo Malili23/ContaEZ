@@ -8,9 +8,11 @@ Contabilidad mexicana gratuita para prácticas universitarias, empresas comercia
 
 ## Empezar
 
+La página de descarga publica la app web y el historial de ediciones de Windows y Mac. [ContaEZ en Cloudflare Pages](https://contaez-mexico.pages.dev/).
+
 La entrega local se encuentra en `Escritorio\ContaEz app`. Abre `ContaEZ.exe` para utilizar la versión de escritorio. Es una **versión piloto de Windows sin firma de editor**; la firma de distribución sigue pendiente.
 
-La compilación de macOS para Apple Silicon está preparada en GitHub Actions. **No se ha verificado todavía en un Mac M1 real y no se anuncia como una descarga Mac terminada.**
+La edición piloto de macOS es ARM64 nativa para M1 o posterior y macOS 14+. Consulta las comprobaciones y los límites de la entrega en [docs/MAC.md](docs/MAC.md). Usa firma ad-hoc; Developer ID y notarización Apple están pendientes.
 
 El inicio tiene dos apartados: **Tu práctica de Excel** a la izquierda y **Contexto para corregirla** a la derecha. Elige el `.xlsx` que quieres corregir y, si lo necesitas, agrega un Excel correcto, fotos, CFDI XML, PDF o una nota como `el asiento en Diario!C1 no funciona`. Pulsa **Revisar mi práctica con este contexto**, revisa las propuestas y descarga la copia. No es necesario crear una empresa ni un catálogo. **Otras modalidades** abre Empresa comercial o Persona física. La guía está en [docs/USO.md](docs/USO.md) y el detalle de cobertura en [docs/ALCANCE.md](docs/ALCANCE.md).
 
@@ -33,7 +35,7 @@ Los documentos de contexto no aportan automáticamente saldos ni importes a la p
 
 ## Validación y límites
 
-Se probaron el motor contable, los importadores y el almacenamiento nativo. El conjunto incluye pruebas automatizadas de JavaScript/TypeScript y **6 pruebas nativas de Rust**. La verificación de recálculo real en Excel para Windows pasó **292 comparaciones numéricas** de los casos comprobados. Estos resultados describen esas pruebas; no constituyen una auditoría integral de cualquier archivo que se importe.
+La versión 0.4.0 pasó **85 pruebas automatizadas de JavaScript/TypeScript**. Las dos pruebas opcionales con los ocho libros privados y una copia de RGE también aprobaron. Las ocho nuevas copias se abrieron y recalcularon en Excel Windows: no introdujeron errores de fórmula ni ciclos. Se conservó una referencia rota previa cuya fuente falta. La descarga desde la interfaz se comprobó con una práctica sintética: la fórmula del modelo produjo 116 a partir de los importes originales 100 y 16, sin copiar las cifras 999 y 1 del modelo. Estos resultados describen esos escenarios; no constituyen una auditoría integral de cualquier archivo que se importe.
 
 Los papeles fiscales automáticos corresponden al paquete **México 2026**, en los regímenes indicados. Un proyecto de 2025 no reutiliza silenciosamente la tarifa de 2026. Las retenciones, acumulados, deducibilidad y otros datos necesarios deben confirmarse. Las reglas incorporadas son implementaciones propias y acotadas: **no se afirma cobertura integral ni certificación de todas las NIF**.
 
@@ -72,7 +74,7 @@ Pruebas nativas:
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-La prueba del almacén seguro utiliza una entrada temporal y necesita una sesión del sistema con ese servicio disponible. El flujo CI omite específicamente esa prueba de integración con el almacén del sistema y ejecuta las restantes.
+La prueba del almacén seguro utiliza una entrada temporal y necesita una sesión del sistema con ese servicio disponible. CI de Windows omite esa prueba; CI de Mac la ejecuta en un Llavero temporal exclusivo del runner.
 
 Para revisar un conjunto privado de prácticas con el mismo revisor de la app:
 
