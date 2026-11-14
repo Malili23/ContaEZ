@@ -1,12 +1,12 @@
 # ContaEZ para Mac con Apple Silicon
 
-**Paquete piloto para M1 o posterior, macOS 14 o posterior, ARM64 nativo.** La versión 0.4.0 se compiló en el runner M1 con macOS 15 de GitHub Actions: aprobaron las pruebas automatizadas, la comprobación de arquitectura, el mínimo declarado, la firma ad-hoc, la estructura del DMG y un arranque nativo mínimo. [Ejecución de compilación](https://github.com/Malili23/ContaEZ/actions/runs/43560290720).
+**Paquete piloto para M1 o posterior, macOS 14 o posterior, ARM64 nativo.** La versión 0.4.1 se compiló en el runner M1 con macOS 15 de GitHub Actions. Aprobaron las pruebas automatizadas, la comprobación de arquitectura, el mínimo declarado, la firma ad-hoc, la estructura del DMG y un arranque nativo mínimo. [Ejecución de compilación](https://github.com/Malili23/ContaEZ/actions/runs/43626694599).
 
 El paquete todavía no tiene Developer ID ni notarización de Apple. El arranque de cinco segundos no sustituye las pruebas visuales y de uso en macOS 14 y versiones actuales indicadas al final de esta guía.
 
 ## Obtener el paquete desde GitHub
 
-La entrega local incluye el DMG, el ZIP de la app y las sumas de comprobación en la carpeta Mac de ContaEz app. Puedes obtener el artefacto completo desde la ejecución de GitHub enlazada arriba. Para compilar otra copia:
+La entrega local incluye el DMG, el ZIP de la app y las sumas de comprobación en la carpeta Mac de ContaEz app. Los instaladores de las dos versiones están en el [historial de Cloudflare](https://contaez-mexico.pages.dev/#versiones). Para compilar otra copia:
 
 1. En el repositorio que contenga este código, abre **Actions → Compilar ContaEZ → Run workflow**.
 2. Espera a que termine el trabajo **macos-arm64**. Una compilación fallida no produce un paquete aprobado.
@@ -57,3 +57,4 @@ Antes de declarar una versión probada en Mac, verifica manualmente en macOS 14 
 - Autorizar y desconectar cuentas desde el navegador, comprobar cancelación y volver a intentarlo.
 
 La edición del navegador tiene almacenamiento y permisos distintos a la edición nativa. No utiliza este Llavero ni este almacén SQLite.
+

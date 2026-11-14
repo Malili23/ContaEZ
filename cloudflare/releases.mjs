@@ -19,10 +19,14 @@ export const releases = [
       { label: 'Código fuente', name: 'ContaEZ-0.4.0-fuente.zip', from: 'release' },
     ],
   },
-  { version: '0.3.0', notes: 'Contexto por práctica, propuestas de fórmulas y revisión explicada.', files: [{ label: 'Windows', name: 'ContaEZ_0.3.0_x64-setup.exe', from: 'release' }] },
+  { version: '0.3.0', notes: 'Contexto por práctica, propuestas de fórmulas y revisión explicada.', files: [
+    { label: 'Windows', name: 'ContaEZ_0.3.0_x64-setup.exe', from: 'release' },
+    { label: 'Código fuente', name: 'ContaEZ-0.3.0-fuente.zip', from: 'release' },
+  ] },
   { version: '0.2.0', notes: 'Flujo para revisar una copia del mismo libro de Excel.', files: [
     { label: 'Windows', name: 'ContaEZ_0.2.0_x64-setup.exe', from: 'release' },
     { label: 'Código fuente', name: 'ContaEZ-0.2.0-fuente.zip', from: 'oldSite' },
   ] },
   { version: '0.1.0', notes: 'Primer piloto de escritorio para Windows.', files: [{ label: 'Windows', name: 'ContaEZ_0.1.0_x64-setup.exe', from: 'release' }] },
 ];
+
