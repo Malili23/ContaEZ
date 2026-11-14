@@ -46,11 +46,34 @@ task_bundle="$task_root/src-tauri/target/aarch64-apple-darwin/release/bundle"
 task_app="$task_bundle/macos/ContaEZ.app"
 task_executable="$task_app/Contents/MacOS/contaez"
 test -f "$task_executable"
-lipo -verify_arch arm64 "$task_executable"
+lipo "$task_executable" -verify_arch arm64
 plutil -lint "$task_app/Contents/Info.plist"
 task_minimum=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$task_app/Contents/Info.plist")
 [[ "$task_minimum" == 14.0 ]] || { echo "Mínimo macOS inesperado: $task_minimum" >&2; exit 1; }
 codesign --verify --deep --strict --verbose=2 "$task_app"
+
+# The CI runner has an unlocked disposable keychain and a GUI session. This
+# catches immediate startup failures without waiting for interactive dialogs.
+if [[ -n "${CONTAEZ_CI_KEYCHAIN:-}" ]]; then
+  task_startup_log="$task_bundle/STARTUP-TEST.txt"
+  "$task_executable" > "$task_startup_log" 2>&1 &
+  task_startup_pid=$!
+  sleep 5
+  if ! kill -0 "$task_startup_pid" 2>/dev/null; then
+    cat "$task_startup_log"
+    echo 'ContaEZ terminó durante la prueba mínima de arranque.' >&2
+    exit 1
+  fi
+  kill -TERM "$task_startup_pid"
+  # Bound shutdown time as well; no other process on the runner is affected.
+  for task_attempt in 1 2 3 4 5; do
+    if ! kill -0 "$task_startup_pid" 2>/dev/null; then break; fi
+    sleep 1
+  done
+  if kill -0 "$task_startup_pid" 2>/dev/null; then kill -KILL "$task_startup_pid"; fi
+  wait "$task_startup_pid" 2>/dev/null || true
+  echo 'El proceso nativo permaneció activo cinco segundos; no certifica interacción visual.' | tee -a "$task_startup_log"
+fi
 task_zip="$task_bundle/ContaEZ-macos-arm64.app.zip"
 ditto -c -k --keepParent "$task_app" "$task_zip"
 task_dmgs=("$task_bundle"/dmg/*.dmg)
@@ -69,6 +92,7 @@ for task_dmg in "${task_dmgs[@]}"; do hdiutil verify "$task_dmg"; done
     printf 'Identidad configurada: %s\n' "$APPLE_SIGNING_IDENTITY"
     printf 'La firma ad-hoc (-) no es Developer ID ni notarización de Apple.\n'
     printf 'Pruebas de Rust/TypeScript y validación de paquete ejecutadas en este Mac.\n'
+    if [[ -n "${CONTAEZ_CI_KEYCHAIN:-}" ]]; then printf 'Arranque nativo mínimo: proceso activo cinco segundos, cierre limitado al PID de prueba.\n'; fi
     printf 'No certifica interacción visual, OCR ni autorización real de proveedores.\n'
   } > BUILD-INFO.txt
 )

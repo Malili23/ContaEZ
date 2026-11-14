@@ -11,7 +11,7 @@ const rgeSource=process.env.CONTAEZ_RGE_REFERENCE;
 const hash=(data:Uint8Array)=>createHash('sha256').update(data).digest('hex');
 describe.skipIf(!privateSource)('Prácticas privadas opcionales, sin alterar sus originales',()=>{
   it('mantiene entradas y componentes en los ocho libros y conecta la copia de la práctica completa',async()=>{
-    const names=(await readdir(privateSource!)).filter(n=>/\.xlsx$/i.test(n)&&!n.startsWith('~$'));expect(names).toHaveLength(8);
+    const names=(await readdir(privateSource!)).filter(n=>/\.xlsx$/i.test(n)&&!n.startsWith('~$')&&!/__(?:corregida|conectada|revisada)(?:_v\d+)?\.xlsx$/i.test(n));expect(names).toHaveLength(8);
     const summaries=[] as unknown[];let connected=false;
     for(const name of names){
       const file=path.join(privateSource!,name),data=await readFile(file),originalHash=hash(data),before=readRawWorkbook(data),result=await repairStudentPractice(data,name),after=readRawWorkbook(result.data);

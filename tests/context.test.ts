@@ -55,6 +55,7 @@ describe('Contexto de una práctica: propuesta de fórmula y confirmación separ
     const practice=await fixture(),references=[{name:'Modelo suma.xlsx',data:await fixture({formula:'SUM(A2:B2)'})},{name:'Modelo resta.xlsx',data:await fixture({formula:'A2-B2'})}];
     const first=inspectPracticeContext(practice,references,'Diario!C2'),second=inspectPracticeContext(practice,references,'Diario!C2');
     expect(first.suggestions).toHaveLength(2);expect(new Set(first.suggestions.map(s=>s.formula)).size).toBe(2);expect(second.suggestions.map(s=>s.id)).toEqual(first.suggestions.map(s=>s.id));
+    expect(first.notes.some(note=>note.includes('Elige una sola alternativa'))).toBe(true);
     const output=applyPracticeContextSuggestion(practice,first.suggestions[0]);expect(()=>applyPracticeContextSuggestion(output,first.suggestions[1])).toThrow(/cambió desde la propuesta/);
     const changed=readRawWorkbook(practice);updateCellFormula(changed.sheets[0],'C2','A2');expect(()=>applyPracticeContextSuggestion(writeRawWorkbook(changed),first.suggestions[0])).toThrow(/cambió desde la propuesta/);
   });
@@ -67,5 +68,9 @@ describe('Contexto de una práctica: propuesta de fórmula y confirmación separ
   it('trata fotos, PDF y CFDI como contexto revisable, sin copiar su contenido ni generar fórmulas',async()=>{
     const context=inspectPracticeContext(await fixture(),[{name:'Póliza.png',data:new Uint8Array([1,2]),text:'Dato privado que no debe aparecer en notas'},{name:'Guía.pdf',data:new Uint8Array([3]),text:'Confirmar el asiento'},{name:'Factura.xml',data:strToU8('<Comprobante Total="9999"/>')}],'Diario!C2 no funciona');
     expect(context.suggestions).toHaveLength(0);expect(context.notes.join(' ')).toContain('Póliza.png');expect(context.notes.join(' ')).toContain('Guía.pdf');expect(context.notes.join(' ')).toContain('Factura.xml');expect(context.notes.join(' ')).not.toContain('Dato privado');expect(context.notes.join(' ')).not.toContain('9999');
+  });
+  it('no propone propagar un error literal que el modelo no contiene',async()=>{
+    const practice=await fixture(),files=unzipSync(practice);files['xl/worksheets/sheet1.xml']=strToU8(new TextDecoder().decode(files['xl/worksheets/sheet1.xml']).replace(/<c\b([^>]*r="A2"[^>]*)>[\s\S]*?<\/c>/,'<c r="A2" t="e"><v>#VALUE!</v></c>'));
+    const result=inspectPracticeContext(zipSync(files),[{name:'Modelo.xlsx',data:await fixture({formula:'SUM(A2:B2)',base:999})}],'Diario!C2');expect(result.suggestions).toHaveLength(0);expect(result.notes.join(' ')).toContain('error guardado');
   });
 });

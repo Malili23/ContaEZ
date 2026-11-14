@@ -7,15 +7,25 @@ let browserDatabase: Promise<IDBDatabase> | undefined;
 let migration: Promise<void> | undefined;
 function database(): Promise<IDBDatabase> {
   if (browserDatabase) return browserDatabase;
-  browserDatabase = new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') { reject(new Error('Este navegador no permite almacenamiento de proyectos. Descarga un respaldo o utiliza la aplicación de escritorio.')); return; }
-    const request = indexedDB.open('contaez-local-v1', 1);
-    request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains('projects')) request.result.createObjectStore('projects', { keyPath: 'id' }); };
-    request.onerror = () => { browserDatabase=undefined; reject(new Error('No se pudo abrir el almacenamiento local del navegador.')); };
-    request.onblocked = () => { browserDatabase=undefined; reject(new Error('Cierra otras pestañas de ContaEZ para actualizar el almacenamiento.')); };
-    request.onsuccess = () => { const db=request.result; db.onversionchange=()=>{db.close();browserDatabase=undefined;}; resolve(db); };
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
+    let settled=false;
+    const fail=(message:string)=>{if(!settled){settled=true;reject(new Error(message));}};
+    if (typeof indexedDB === 'undefined') { fail('Este navegador no permite almacenamiento de proyectos. Descarga un respaldo o utiliza la aplicación de escritorio.'); return; }
+    try{
+      const request = indexedDB.open('contaez-local-v1', 1);
+      request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains('projects')) request.result.createObjectStore('projects', { keyPath: 'id' }); };
+      request.onerror = () => fail('No se pudo abrir el almacenamiento local del navegador.');
+      request.onblocked = () => fail('Cierra otras pestañas de ContaEZ para actualizar el almacenamiento.');
+      request.onsuccess = () => {
+        const db=request.result;if(settled){db.close();return;}settled=true;
+        const forget=()=>{if(browserDatabase===opening)browserDatabase=undefined;};
+        db.onclose=forget;db.onversionchange=()=>{db.close();forget();};resolve(db);
+      };
+    }catch{fail('No se pudo abrir el almacenamiento local del navegador.');}
   });
-  return browserDatabase;
+  browserDatabase=opening;
+  void opening.catch(()=>{if(browserDatabase===opening)browserDatabase=undefined;});
+  return opening;
 }
 function validProject(value: unknown): value is Project {
   if (!value || typeof value !== 'object') return false;
@@ -24,15 +34,21 @@ function validProject(value: unknown): value is Project {
 }
 function readAll(db: IDBDatabase): Promise<Project[]> {
   return new Promise((resolve,reject)=>{
+    let projects:Project[]=[];
     const transaction=db.transaction('projects','readonly'); const request=transaction.objectStore('projects').getAll();
-    request.onsuccess=()=>resolve((request.result as unknown[]).filter(validProject));
+    request.onsuccess=()=>{projects=(request.result as unknown[]).filter(validProject);};
     request.onerror=()=>reject(new Error('No se pudieron leer los proyectos de este navegador.'));
+    transaction.oncomplete=()=>resolve(projects);
+    transaction.onerror=()=>reject(new Error('No se pudieron leer los proyectos de este navegador.'));
+    transaction.onabort=()=>reject(new Error('La lectura de los proyectos se interrumpió. Vuelve a intentarlo.'));
   });
 }
 async function migrateLegacy(db: IDBDatabase): Promise<void> {
   if (migration) return migration;
   migration=(async()=>{
-    const raw=localStorage.getItem(BROWSER_KEY); if (!raw) return;
+    let legacyStorage:Storage,raw:string|null;
+    try{legacyStorage=globalThis.localStorage;raw=legacyStorage.getItem(BROWSER_KEY);}catch{return;}
+    if (!raw) return;
     let legacy: unknown;
     try { legacy=JSON.parse(raw); } catch { throw new Error('El almacenamiento anterior está dañado. Se conservó intacto para recuperación.'); }
     if (!Array.isArray(legacy)) throw new Error('El almacenamiento anterior no tiene un formato válido. Se conservó intacto.');
@@ -43,7 +59,7 @@ async function migrateLegacy(db: IDBDatabase): Promise<void> {
       transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(new Error('No se pudo migrar el almacenamiento. El respaldo anterior sigue intacto.'));transaction.onabort=transaction.onerror;
       for(const project of merged.values())transaction.objectStore('projects').put(project);
     });
-    if(projects.length===legacy.length&&localStorage.getItem(BROWSER_KEY)===raw)localStorage.removeItem(BROWSER_KEY);
+    try{if(projects.length===legacy.length&&legacyStorage.getItem(BROWSER_KEY)===raw)legacyStorage.removeItem(BROWSER_KEY);}catch{/* The completed IndexedDB migration remains usable; the legacy copy is retained. */}
   })();
   try { await migration; } catch(error){migration=undefined;throw error;}
 }
@@ -80,11 +96,24 @@ export async function saveProject(project: Project): Promise<void> {
 export async function deleteProject(id: string): Promise<void> {
   return enqueue(id,()=>isDesktop()?native<void>('project_delete',{id}):mutateBrowser(id));
 }
+function exportFileName(name:string):string{
+  let safe=(name.split(/[\\/]/).pop()||'ContaEZ-exportacion').replace(/[\u0000-\u001f\u007f<>:"|?*]/g,'_').replace(/^[. ]+|[. ]+$/g,'');
+  if(!safe)safe='ContaEZ-exportacion';
+  if(/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(safe))safe='_'+safe;
+  const extension=safe.match(/\.[a-z0-9]{1,16}$/i)?.[0]||'',stem=extension?safe.slice(0,-extension.length):safe;
+  return Array.from(stem).slice(0,100).join('')+extension;
+}
 export async function exportBytes(bytes: Uint8Array, name: string): Promise<void> {
-  if (isDesktop()) { const path=await native<string | null>('save_export', { data: Array.from(bytes), name }); if(!path)throw new Error('Exportación cancelada; no se guardó ningún archivo.');return; }
-  const blob = new Blob([bytes as BlobPart], { type: name.endsWith('.xlsx') ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'application/octet-stream' });
+  const fileName=exportFileName(name);
+  if (isDesktop()) { const path=await native<string | null>('save_export', { data: Array.from(bytes), name:fileName }); if(!path)throw new Error('Exportación cancelada; no se guardó ningún archivo.');return; }
+  const types:Record<string,string>={xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',contaez:'application/json',json:'application/json',csv:'text/csv;charset=utf-8',txt:'text/plain;charset=utf-8',pdf:'application/pdf'};
+  const extension=fileName.split('.').pop()?.toLowerCase()||'';
+  const blob = new Blob([bytes as BlobPart], { type: types[extension]||'application/octet-stream' });
   const url = URL.createObjectURL(blob);
-  const link = document.createElement('a'); link.href = url; link.download = name; link.click();
+  let link:HTMLAnchorElement|undefined;
+  try{link=document.createElement('a');link.href=url;link.download=fileName;link.hidden=true;document.body.appendChild(link);link.click();}
+  catch(error){URL.revokeObjectURL(url);throw error;}
+  finally{link?.remove();}
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 export async function backupProject(project: Project): Promise<void> {

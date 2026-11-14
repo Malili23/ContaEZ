@@ -42,7 +42,7 @@ La autorización abre el navegador del sistema y recibe el retorno en un puerto 
 
 ## Qué comprueba el flujo y qué falta probar
 
-CI ejecuta pruebas TypeScript y Rust, incluida una escritura/lectura/borrado de un secreto temporal en un Llavero exclusivo del runner. Comprueba arquitectura ARM64, configuración mínima de macOS, firma y estructura del DMG. En una compilación local se omite el test interactivo del Llavero por defecto; puedes activarlo con `CONTAEZ_TEST_KEYCHAIN=1 bash scripts/build-macos.sh`.
+CI ejecuta pruebas TypeScript y Rust, incluida una escritura/lectura/borrado de un secreto temporal en un Llavero exclusivo del runner. Comprueba arquitectura ARM64, configuración mínima de macOS, firma y estructura del DMG. En CI también inicia el programa nativo, verifica que su proceso permanezca activo cinco segundos y cierra únicamente ese proceso con tiempo limitado. El resultado se adjunta en `STARTUP-TEST.txt`; no comprueba botones ni lectura visual de la pantalla. En una compilación local se omite el test interactivo del Llavero por defecto; puedes activarlo con `CONTAEZ_TEST_KEYCHAIN=1 bash scripts/build-macos.sh`.
 
 Antes de declarar una versión probada en Mac, verifica manualmente en macOS 14 y en una versión actual:
 

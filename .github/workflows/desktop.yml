@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    paths-ignore: ['docs/**', 'README.md', 'site/**']
 permissions:
   contents: read
 jobs:
@@ -76,4 +77,5 @@ jobs:
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/SHA256SUMS.txt
             src-tauri/target/aarch64-apple-darwin/release/bundle/BUILD-INFO.txt
+            src-tauri/target/aarch64-apple-darwin/release/bundle/STARTUP-TEST.txt
           if-no-files-found: error
