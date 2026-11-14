@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp xmlns="http://schemas.microsoft.com/office/appforoffice/1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TaskPaneApp">
-  <Id>6b427b9a-7fc3-4c4b-a65d-7abcb6704b3a</Id><Version>0.4.1.0</Version><ProviderName>betcover_ii</ProviderName><DefaultLocale>es-MX</DefaultLocale>
+  <Id>6b427b9a-7fc3-4c4b-a65d-7abcb6704b3a</Id><Version>0.5.0.0</Version><ProviderName>betcover_ii</ProviderName><DefaultLocale>es-MX</DefaultLocale>
   <DisplayName DefaultValue="ContaEZ México"/><Description DefaultValue="Corrige y conecta tu misma práctica Excel para México. Gratis y sin IA obligatoria."/>
   <IconUrl DefaultValue="__ORIGIN__/addin/icons/32x32.png"/><HighResolutionIconUrl DefaultValue="__ORIGIN__/addin/icons/80x80.png"/>
   <SupportUrl DefaultValue="https://www.instagram.com/betcover_ii/"/>

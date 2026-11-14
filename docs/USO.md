@@ -107,7 +107,15 @@ En **Configuración**, el cierre conserva las reglas utilizadas y evita cambios 
 
 La app de escritorio guarda los datos localmente con contenido cifrado y una clave protegida por el sistema operativo. La vista web los guarda en el navegador. Borrar esos datos puede eliminar las prácticas y proyectos guardados; conserva tus copias descargadas.
 
-ChatGPT es opcional. Su autorización utiliza la cuenta y el plan elegible del usuario; los cálculos básicos siguen disponibles sin esa conexión. La consulta indica qué contexto se enviará y no adjunta automáticamente todos los originales.
+### Generar una práctica completa
+
+Desde el inicio de Prácticas, abre **Generar una práctica completa**. Descarga la plantilla en blanco o el ejemplo. Completa el diario con los asientos y el catálogo con las cuentas, sus grupos y los saldos de apertura. Sube el Excel para obtener una copia con mayor, cuentas T, balanza de comprobación, estado de resultados, balance general y controles vinculados. Si faltan datos o un asiento está descuadrado, la app indica qué revisar.
+
+### Consultar con ChatGPT
+
+Abre una práctica revisada y elige **Consultar con ChatGPT**. Escribe tu pregunta y revisa el texto que se compartirá. En Windows y Mac, pulsa **Continuar con ChatGPT**, autoriza la conexión en el navegador y vuelve a ContaEZ. Cuando aparezca **Cuenta conectada**, pulsa **Enviar pregunta a ChatGPT**. La autorización requiere una cuenta elegible para usar su plan en la app. [Guía de OpenAI](https://developers.openai.com/siwc/token-sharing-open-source).
+
+En la vista web o si prefieres usar tu cuenta por separado, pulsa **Copiar consulta** y **Abrir ChatGPT**, pega la consulta y envíala. La revisión y los cálculos contables funcionan sin conexión a ChatGPT.
 
 Google Sheets necesita un cliente OAuth de escritorio configurado y autorización de la cuenta. No es necesario configurarlo para descargar un Excel. La exportación a CONTPAQi requiere un perfil validado para el producto y versión de destino.
 

@@ -71,12 +71,12 @@ await cp(path.join(cloudflare, '_headers'), path.join(output, '_headers'));
 await writeFile(path.join(output, 'version.json'), `${JSON.stringify({ web: edition, versions: libraries.map(release => ({version: release.version, files: release.files.map(file => file.name)})) }, null, 2)}\n`);
 
 const releaseHtml = libraries.map(release => `<article class="release"><div><h3>${release.version}</h3><p>${release.notes}</p></div><div class="release-files">${release.files.map(file => `<a href="${filePath(file)}" download aria-label="Descargar ${file.label} ${release.version}">${file.label}</a>`).join('')}</div></article>`).join('\n');
-const windows = libraries[0].files.find(file => file.label === 'Windows');
-const code = libraries[0].files.find(file => file.label === 'Código fuente');
+const windowsRelease = libraries.find(release => release.files.some(file => file.label === 'Windows'));
+const windows = windowsRelease.files.find(file => file.label === 'Windows');
 const macRelease = libraries.find(release => release.files.some(file => file.label === 'Mac (DMG)'));
 const mac = macRelease.files.find(file => file.label === 'Mac (DMG)');
 const template = await readFile(path.join(cloudflare, 'index.html'), 'utf8');
-await writeFile(path.join(output, 'index.html'), template.replaceAll('__VERSION__', edition).replace('__WINDOWS__', filePath(windows)).replace('__MAC__', filePath(mac)).replace('__MAC_VERSION__', macRelease.version).replace('__SOURCE__', filePath(code)).replace('__RELEASES__', releaseHtml));
+await writeFile(path.join(output, 'index.html'), template.replace('__WINDOWS__', filePath(windows)).replace('__WINDOWS_VERSION__', windowsRelease.version).replace('__MAC__', filePath(mac)).replace('__MAC_VERSION__', macRelease.version).replace('__RELEASES__', releaseHtml));
 
 for (const relative of await readdir(output, { recursive: true })) {
   const information = await stat(path.join(output, relative));

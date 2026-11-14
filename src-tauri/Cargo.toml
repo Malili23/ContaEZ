@@ -1,6 +1,6 @@
 [package]
 name = "contaez"
-version = "0.4.1"
+version = "0.5.0"
 description = "Contabilidad mexicana gratuita"
 authors = ["betcover_ii <gallardoquirozd4@gmail.com>"]
 edition = "2021"

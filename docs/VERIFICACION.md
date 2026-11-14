@@ -9,4 +9,3 @@
 
 Descargas y versiones: https://contaez-mexico.pages.dev/#versiones
 Compilación: https://github.com/Malili23/ContaEZ/actions/runs/43626694599
-

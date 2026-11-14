@@ -1,0 +1,53 @@
+.contaez-download-desktop {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: 1px solid #c6d8cc;
+  border-radius: 8px;
+  color: #20533e;
+  background: #f2f7f0;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.contaez-download-desktop:hover { background: #e1eee1; }
+.contaez-download-platforms { color: #476b56; font-weight: 500; font-size: 11px; }
+.student-completion-jump { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 13px; font-weight: 650; color: #25533c; }
+.student-intro h1 { color: #1e4032; }
+.student-intro h1 span { color: #4b704f; }
+.student-intro > p { color: #496556; }
+.completion-panel {
+  max-width: 930px;
+  margin: 26px auto;
+  background: #f0f5eb;
+  color: #234737;
+  border: 1px solid #cddcce;
+  border-radius: 14px;
+  padding: clamp(16px, 2.5vw, 25px);
+}
+.completion-intro { display: flex; align-items: flex-start; gap: 13px; }
+.completion-icon { display: grid; place-items: center; flex: 0 0 42px; height: 42px; border-radius: 9px; background: #dae9dc; color: #25533c; }
+.completion-intro h2 { margin: 0; font-size: 19px; color: #234737; }
+.completion-panel p, .completion-steps { color: #456452; font-size: 14px; line-height: 1.6; }
+.completion-intro p { margin: 4px 0 0; }
+.completion-panel details { border-top: 1px solid #cddcce; margin-top: 15px; padding-top: 12px; }
+.completion-panel summary { cursor: pointer; font-size: 14px; font-weight: 700; color: #1f5139; }
+.completion-steps { padding-left: 24px; margin: 12px 0; }
+.completion-actions, .completion-file { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.completion-file > span { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; overflow-wrap: anywhere; }
+.completion-panel .completion-error { margin-top: 13px; color: #8b2428; white-space: pre-line; }
+.completion-result { margin-top: 14px; padding: 14px; border-radius: 8px; background: #fff; }
+.completion-result h3 { font-size: 16px; }
+.completion-result p, .completion-result ul { margin: 5px 0 10px; }
+.completion-result ul { display: flex; flex-wrap: wrap; gap: 2px 20px; margin-left: 18px; color: #456452; font-size: 13px; }
+.completion-totals { display: flex; flex-wrap: wrap; gap: 10px 22px; padding-block: 11px; margin: 0 0 8px; }
+.completion-totals dt { color: #456452; font-size: 12px; }
+.completion-totals dd { margin: 2px 0 0; color: #153e2c; font-size: 15px; font-weight: 700; }
+@media (max-width: 960px) { .contaez-download-platforms { display: none; } }
+@media (max-width: 520px) {
+  .student-header { height: auto; min-height: 65px; flex-wrap: wrap; gap: 8px; padding-block: 10px; }
+  .student-header-actions { flex-wrap: wrap; gap: 8px 13px; }
+  .contaez-download-desktop { padding: 6px 8px; font-size: 12px; }
+}

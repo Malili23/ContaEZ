@@ -12,16 +12,15 @@
   <a class="skip" href="#contenido">Ir al contenido</a>
   <header class="wrap top">
     <a class="brand" href="/" aria-label="ContaEZ, inicio"><span class="brand-icon" aria-hidden="true">▤</span>Conta<span>EZ</span></a>
-    <nav aria-label="Navegación"><a href="#descargas">Descargas</a><a href="#versiones">Versiones</a><a href="/app/">Abrir app ↗</a></nav>
+    <nav aria-label="Navegación"><a href="#descargas">Descargas</a><a href="#versiones">Versiones</a><a href="#chatgpt">ChatGPT</a><a href="/app/">Abrir app ↗</a></nav>
   </header>
   <main id="contenido" class="wrap">
     <section class="hero" aria-labelledby="titulo">
       <div>
         <p class="eyebrow">Contabilidad para México</p>
-        <h1 id="titulo">Corrige tu práctica de Excel.</h1>
-        <p class="lead">Sube tu libro y agrega un ejemplo, fotos, CFDI, PDF o una nota. ContaEZ conecta las hojas que reconoce y explica cada cambio en la copia que descargas.</p>
-        <div class="actions"><a class="button primary" href="/app/">Revisar mi Excel</a><a class="button secondary" href="#descargas">Descargar la app ↓</a></div>
-        <p class="meta">Gratis y de código abierto. La revisión básica funciona sin cuenta.</p>
+        <h1 id="titulo">Tu práctica de Excel, de principio a fin.</h1>
+        <p class="lead">Revisa tu libro con un ejemplo o un enunciado. Si ya tienes los asientos y el catálogo, genera el mayor, la balanza y los estados en una copia vinculada.</p>
+        <p class="meta">Gratis y de código abierto. La revisión y los cálculos funcionan sin cuenta.</p>
       </div>
       <div class="example" aria-label="Ejemplo de una corrección">
         <div class="example-title"><span>Ejemplo</span><code>Diario!C2</code></div>
@@ -30,19 +29,24 @@
         <div class="example-formula"><code>#REF!</code><span aria-hidden="true">→</span><code>SUM(A2:B2)</code></div>
       </div>
     </section>
-    <section class="block" id="descargas" aria-labelledby="titulo-descargas">
-      <h2 id="titulo-descargas">Descargar ContaEZ</h2>
+    <section class="block start" id="descargas" aria-labelledby="titulo-descargas">
+      <h2 id="titulo-descargas">Elige cómo usar ContaEZ</h2>
       <div class="platforms">
-        <article class="card"><h3>Windows</h3><p>Windows 11 de 64 bits. Instalador piloto sin firma de editor.</p><a class="button primary" href="__WINDOWS__" download>Descargar Windows __VERSION__ ↓</a></article>
+        <article class="card browser-card"><h3>En el navegador</h3><p>Revisa un Excel y descarga tu copia. Tus proyectos se guardan en este navegador.</p><a class="button primary" href="/app/">Usar versión web ↗</a></article>
+        <article class="card"><h3>Windows</h3><p>Windows 11 de 64 bits. Instalador piloto sin firma de editor.</p><a class="button secondary" href="__WINDOWS__" download>Descargar Windows __WINDOWS_VERSION__ ↓</a></article>
         <article class="card"><h3>Mac con Apple Silicon</h3><p>M1 o posterior y macOS 14+. Instalador piloto con firma ad-hoc, pendiente de notarización.</p><a class="button secondary" href="__MAC__" download>Descargar Mac __MAC_VERSION__ ↓</a><a class="small-link" href="/downloads/Guia-Mac.txt">Guía para Mac</a></article>
-        <article class="card"><h3>Código abierto</h3><p>Consulta las reglas, el historial y las pruebas. Licencia GPL versión 3.</p><a class="button secondary" href="__SOURCE__" download>Descargar código __VERSION__ ↓</a><a class="small-link" href="https://github.com/Malili23/ContaEZ">Ver repositorio</a></article>
       </div>
+    </section>
+    <section class="block about" id="chatgpt" aria-labelledby="titulo-chatgpt">
+      <h2 id="titulo-chatgpt">Consulta una duda en ChatGPT</h2>
+      <p>Abre una práctica revisada y selecciona <strong>Consultar con ChatGPT</strong>. En el navegador, escribe tu pregunta, pulsa <strong>Copiar consulta</strong> y pégala en ChatGPT con tu cuenta.</p>
+      <p>En Windows o Mac, pulsa <strong>Continuar con ChatGPT</strong> y autoriza el uso de tu plan en OpenAI. Vuelve a ContaEZ y pulsa <strong>Enviar pregunta a ChatGPT</strong>. La conexión integrada requiere una cuenta elegible. También puedes copiar y pegar la consulta desde la app de escritorio.</p>
     </section>
     <section class="block" id="versiones" aria-labelledby="titulo-versiones">
       <h2 id="titulo-versiones">Historial de versiones</h2>
       <p class="section-note">Elige la última versión disponible para tu equipo. El historial conserva los instaladores de las entregas anteriores.</p>
       <div class="release-list">__RELEASES__</div>
-      <p class="meta"><a href="/downloads/SHA256SUMS.txt">Ver las sumas SHA-256 de todos los archivos</a></p>
+      <p class="meta"><a href="/downloads/SHA256SUMS.txt">Sumas SHA-256</a> · <a href="https://github.com/Malili23/ContaEZ">Código en GitHub</a></p>
     </section>
     <section class="block about" aria-labelledby="titulo-alcance">
       <h2 id="titulo-alcance">Solo para México</h2>

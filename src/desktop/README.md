@@ -6,6 +6,8 @@ La vista web utiliza IndexedDB del navegador y no ofrece el mismo cifrado. La mi
 
 ## ChatGPT
 
+En **Prácticas**, abre un ejercicio y elige **Consultar con ChatGPT**. Escribe tu pregunta y, si te ayuda, elige una observación. Revisa la vista previa. En escritorio puedes elegir **Continuar con ChatGPT**, autorizar en el navegador y volver a ContaEZ para pulsar **Enviar pregunta a ChatGPT**. La opción **Copiar consulta** y el enlace **Abrir ChatGPT** también funcionan sin conectar la app a tu cuenta. El icono del botón de autorización se incluye localmente a partir del [recurso oficial de OpenAI](https://developers.openai.com/assets/siwc/sign-in-buttons/chatgpt-logo-black.svg).
+
 El botón **Continue with ChatGPT** utiliza OAuth de cliente público con PKCE, `state`, `nonce`, retorno HTTP en `127.0.0.1`, validación de firma JWKS, emisor, audiencia y expiración. La instalación conserva un identificador de host opaco. El registro emitido por OpenAI y su identidad se guardan por separado; las credenciales están cifradas.
 
 Las solicitudes utilizan modelos disponibles para la cuenta, `POST /v1/responses`, `store:false`, `stream:true` y solo concluyen cuando llega `response.completed`. Los límites y errores no afectan el motor contable. No se incluye una clave API común ni un cambio automático a una API facturable.

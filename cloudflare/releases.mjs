@@ -1,5 +1,15 @@
 export const releases = [
   {
+    version: '0.5.0',
+    notes: 'Práctica completa con cuentas T y estados vinculados, descargas visibles y consultas opcionales en ChatGPT.',
+    files: [
+      { label: 'Windows', name: 'ContaEZ_0.5.0_x64-setup.exe', from: 'release', optional: true },
+      { label: 'Mac (DMG)', name: 'ContaEZ-0.5.0-Mac-Apple-Silicon.dmg', from: 'release', source: 'Mac/ContaEZ-0.5.0-Mac-Apple-Silicon.dmg', optional: true },
+      { label: 'Mac (ZIP)', name: 'ContaEZ-0.5.0-Mac-Apple-Silicon.app.zip', from: 'release', source: 'Mac/ContaEZ-0.5.0-Mac-Apple-Silicon.app.zip', optional: true },
+      { label: 'Código fuente', name: 'ContaEZ-0.5.0-fuente.zip', from: 'release' },
+    ],
+  },
+  {
     version: '0.4.1',
     notes: 'Correcciones de Excel, guardado y cálculos contables. Es la edición de la app web.',
     files: [
@@ -29,4 +39,3 @@ export const releases = [
   ] },
   { version: '0.1.0', notes: 'Primer piloto de escritorio para Windows.', files: [{ label: 'Windows', name: 'ContaEZ_0.1.0_x64-setup.exe', from: 'release' }] },
 ];
-

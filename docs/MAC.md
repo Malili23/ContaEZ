@@ -57,4 +57,3 @@ Antes de declarar una versión probada en Mac, verifica manualmente en macOS 14 
 - Autorizar y desconectar cuentas desde el navegador, comprobar cancelación y volver a intentarlo.
 
 La edición del navegador tiene almacenamiento y permisos distintos a la edición nativa. No utiliza este Llavero ni este almacén SQLite.
-

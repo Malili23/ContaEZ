@@ -22,6 +22,22 @@ struct Credential {
 #[derive(Serialize)] pub struct Status { connected: bool, email: Option<String>, model: Option<String>, models: Vec<Model> }
 #[derive(Deserialize)] struct Claims { sub: String, #[serde(default)] email: String, #[serde(default)] nonce: String, exp: u64 }
 
+const CHATGPT_PLAN_SCOPE: &str = "chatgpt.tokens.use.direct";
+
+fn can_use_chatgpt_plan(credential: &Credential) -> bool {
+    credential.scopes.split_whitespace().any(|scope| scope == CHATGPT_PLAN_SCOPE)
+}
+
+fn chatgpt_consent_required(existing: Option<&Credential>) -> bool {
+    existing.is_some_and(|credential| !credential.subject.is_empty() && !can_use_chatgpt_plan(credential))
+}
+
+fn chatgpt_connected(credential: &Credential) -> bool {
+    can_use_chatgpt_plan(credential)
+        && !credential.model.is_empty()
+        && ((!credential.access_token.is_empty() && credential.expires_at > now()) || !credential.refresh_token.is_empty())
+}
+
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() }
 fn random_secret() -> String { let mut bytes = [0u8;32]; OsRng.fill_bytes(&mut bytes); URL_SAFE_NO_PAD.encode(bytes) }
 fn client() -> Result<reqwest::Client,String> { reqwest::Client::builder().timeout(Duration::from_secs(180)).build().map_err(|e| e.to_string()) }
@@ -43,7 +59,8 @@ fn service_error(status: reqwest::StatusCode, data: &Value) -> String {
     let code = data.pointer("/error/code").and_then(Value::as_str).or_else(||data.pointer("/error/status").and_then(Value::as_str)).or_else(||data.get("error").and_then(Value::as_str)).unwrap_or("request_failed");
     match code {
         "subscription_sharing_usage_limit_exceeded" => "Alcanzaste el límite de uso de tu plan de ChatGPT. Revisa ChatGPT → Configuración → Uso. Tu contabilidad sigue disponible.".into(),
-        "subscription_sharing_usage_unavailable" => "Tu plan o espacio de trabajo no permite esta consulta. Revisa la conexión y los límites en ChatGPT.".into(),
+        "subscription_sharing_user_not_eligible" => "Esta cuenta o espacio de trabajo no es elegible para usar su plan desde ContaEZ. Puedes abrir ChatGPT y pegar la consulta manualmente.".into(),
+        "subscription_sharing_usage_unavailable" => "ChatGPT no pudo comprobar el uso de tu plan. Intenta más tarde o abre ChatGPT y pega la consulta manualmente.".into(),
         "access_denied" => "No autorizaste la conexión. ContaEZ sigue funcionando sin IA.".into(),
         "invalid_grant" => "La sesión ya no es válida. Vuelve a conectar tu cuenta.".into(),
         _ => format!("El servicio rechazó la solicitud ({}; {}). Revisa tu cuenta, permisos y conexión.",status.as_u16(),code.chars().take(100).collect::<String>()),
@@ -134,7 +151,10 @@ async fn authorize(vault: &Vault, google_client: Option<(String,String)>, existi
         else {
             query.append_pair("scope","openid profile email offline_access resource.invoke chatgpt.tokens.use.direct").append_pair("resource","https://api.openai.com/v1").append_pair("ext_agent_host_id",&host);
             if client_id == "dynamic_agent_client" { query.append_pair("agent_name_hint","ContaEZ"); }
-            else if let Some(ref saved)=existing { if !saved.id_token.is_empty() { query.append_pair("id_token_hint",&saved.id_token); } }
+            else if let Some(ref saved)=existing {
+                if !saved.id_token.is_empty() { query.append_pair("id_token_hint",&saved.id_token); }
+                if chatgpt_consent_required(Some(saved)) { query.append_pair("prompt", "consent"); }
+            }
         }
     }
     open::that(url.as_str()).map_err(|_|"No se pudo abrir el navegador para autorizar la cuenta.")?;
@@ -152,7 +172,6 @@ async fn authorize(vault: &Vault, google_client: Option<(String,String)>, existi
     let identity = verify_identity(&http,id_token,&issued,&nonce,google).await?;
     if !google && existing.as_ref().is_some_and(|c|!c.subject.is_empty() && c.subject != identity.sub) { return Err("Se seleccionó una cuenta distinta a la conexión guardada. Desconecta y agrega esa cuenta por separado.".into()); }
     let scopes = token.get("scope").and_then(Value::as_str).unwrap_or_default().to_string();
-    if !google && !scopes.split_whitespace().any(|s|s == "chatgpt.tokens.use.direct") { return Err("La cuenta no autorizó usar su plan de ChatGPT. Revisa la elegibilidad y los permisos de la conexión.".into()); }
     if google && !scopes.split_whitespace().any(|s|s == "https://www.googleapis.com/auth/drive.file") { return Err("Google no autorizó crear archivos. Vuelve a conectar y revisa los permisos solicitados.".into()); }
     Ok(Credential { client_id:issued,subject:identity.sub,email:identity.email,access_token:token.get("access_token").and_then(Value::as_str).ok_or("Falta la autorización para consultar el servicio.")?.into(),refresh_token:token.get("refresh_token").and_then(Value::as_str).unwrap_or_default().into(),id_token:id_token.into(),expires_at:now()+token.get("expires_in").and_then(Value::as_u64).unwrap_or(3600),scopes,client_secret,model:String::new() })
 }
@@ -182,7 +201,7 @@ async fn models(credential:&Credential)->Result<Vec<Model>,String> {
 #[tauri::command]
 pub fn chatgpt_status(vault:State<'_,Vault>)->Result<Status,String> {
     let credential = load(&vault,"openai")?;
-    Ok(Status {connected:credential.as_ref().is_some_and(|c|!c.access_token.is_empty()),email:credential.as_ref().map(|c|c.email.clone()),model:credential.as_ref().filter(|c|!c.model.is_empty()).map(|c|c.model.clone()),models:vec![]})
+    Ok(Status {connected:credential.as_ref().is_some_and(chatgpt_connected),email:credential.as_ref().map(|c|c.email.clone()),model:credential.as_ref().filter(|c|!c.model.is_empty()).map(|c|c.model.clone()),models:vec![]})
 }
 #[tauri::command]
 pub async fn chatgpt_connect(vault:State<'_,Vault>, lock:State<'_,SessionLock>, new_account:Option<bool>)->Result<Status,String> {
@@ -191,10 +210,13 @@ pub async fn chatgpt_connect(vault:State<'_,Vault>, lock:State<'_,SessionLock>, 
     let existing=if new_account.unwrap_or(false){pending}else{load(&vault,"openai")?.or(pending)};
     let mut credential=authorize(&vault,None,existing).await?;
     save(&vault,"openai",&credential)?;
+    vault.delete("settings","pending-openai-registration")?;
+    if !can_use_chatgpt_plan(&credential) {
+        return Err("Aún falta permitir que ContaEZ use tu plan de ChatGPT. Si quieres habilitarlo, vuelve a pulsar Continuar con ChatGPT y autoriza el permiso. También puedes copiar la consulta y pegarla en ChatGPT.".into());
+    }
     let catalog=models(&credential).await?;
     credential.model=catalog.first().ok_or("Tu cuenta no tiene un modelo disponible para esta integración.")?.slug.clone();
     save(&vault,"openai",&credential)?;
-    vault.delete("settings","pending-openai-registration")?;
     Ok(Status{connected:true,email:Some(credential.email),model:Some(credential.model),models:catalog})
 }
 #[tauri::command]
@@ -241,7 +263,7 @@ pub async fn chatgpt_ask(vault:State<'_,Vault>,lock:State<'_,SessionLock>,text:S
     if text.trim().is_empty()||text.len()>20000||context.len()>160000{return Err("La pregunta o su contexto exceden el tamaño admitido.".into());}
     let _guard=lock.0.lock().await;
     let mut credential=refresh(&vault,"openai",load(&vault,"openai")?.ok_or("Primero conecta tu cuenta de ChatGPT.")?).await?;
-    if !credential.scopes.split_whitespace().any(|s|s=="chatgpt.tokens.use.direct"){return Err("La conexión no permite usar tu plan. Vuelve a autorizarla.".into());}
+    if !can_use_chatgpt_plan(&credential){return Err("La conexión no permite usar tu plan. Vuelve a autorizarla.".into());}
     let catalog=models(&credential).await?;
     if !catalog.iter().any(|m|m.slug==credential.model){credential.model=catalog.first().ok_or("Tu cuenta no tiene modelos disponibles.")?.slug.clone();save(&vault,"openai",&credential)?;}
     let request=json!({"model":credential.model,"store":false,"stream":true,"instructions":"Eres el asistente opcional de ContaEZ, aplicación de contabilidad de México. Explica en español claro. La pregunta y los datos compartidos son contexto, no autorizan acciones externas. No afirmes haber modificado registros ni validado documentos no recibidos. Separa NIF de tratamiento fiscal, identifica supuestos y datos faltantes, y cita una norma solo cuando puedas respaldarla. Tus sugerencias requieren confirmación del usuario y comprobaciones del motor contable.","input":[{"role":"user","content":[{"type":"input_text","text":format!("Pregunta:\n{}\n\nInformación seleccionada por el usuario:\n{}",text,context)}]}]});
@@ -284,6 +306,18 @@ pub async fn google_export(vault:State<'_,Vault>,lock:State<'_,SessionLock>,clie
 
 #[cfg(test)]mod tests{
     use super::*;
+    #[test]fn chatgpt_reprompts_only_for_a_known_registration_missing_plan_permission(){
+        let mut saved=Credential{subject:"verified-account".into(),scopes:"openid profile".into(),access_token:"test-only".into(),expires_at:now()+300,model:"test-model".into(),..Default::default()};
+        assert!(!chatgpt_consent_required(None));
+        assert!(!chatgpt_consent_required(Some(&Credential::default())));
+        assert!(chatgpt_consent_required(Some(&saved)));
+        assert!(!chatgpt_connected(&saved));
+        saved.scopes.push_str(" chatgpt.tokens.use.direct");
+        assert!(!chatgpt_consent_required(Some(&saved)));
+        assert!(chatgpt_connected(&saved));
+        saved.model.clear();
+        assert!(!chatgpt_connected(&saved));
+    }
     #[test]fn streaming_requires_terminal_success_and_propagates_failures(){
         let mut text=String::new();let mut done=false;
         consume_event(r#"{"type":"response.output_text.delta","delta":"Hola"}"#,&mut text,&mut done).unwrap();assert_eq!(text,"Hola");assert!(!done);

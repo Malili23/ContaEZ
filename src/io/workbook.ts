@@ -138,13 +138,29 @@ export function appendReviewSheet(book:RawBook,rows:string[][],name='Revisión C
   const content=rows.map((row,i)=>`<row r="${i+1}">${row.map((v,j)=>`<c r="${columnName(j+1)}${i+1}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(v)}</t></is></c>`).join('')}</row>`).join('');
   const xml=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:G${rows.length}"/><sheetViews><sheetView workbookViewId="0"/></sheetViews><sheetFormatPr defaultRowHeight="30"/><cols><col min="1" max="2" width="22" customWidth="1"/><col min="3" max="7" width="55" customWidth="1"/></cols><sheetData>${content}</sheetData><autoFilter ref="A1:G${rows.length}"/></worksheet>`;
   if(existing){book.files[existing.path]=strToU8(xml);existing.xml=xml;return;}
+  appendWorksheetXml(book,name,xml);
+}
+
+/** Insert a package part while retaining all existing worksheets and other relationships. */
+export function appendWorksheetXml(book:RawBook,name:string,xml:string):void {
+  if (book.sheets.some(sheet => sheet.name.toLowerCase() === name.toLowerCase())) throw new Error(`La hoja ${name} ya existe en el libro.`);
   let workbook=strFromU8(book.files['xl/workbook.xml']);let rels=strFromU8(book.files['xl/_rels/workbook.xml.rels']);let types=strFromU8(book.files['[Content_Types].xml']);
-  const ids=[...workbook.matchAll(/sheetId="(\d+)"/g)].map(m=>Number(m[1]));const id=Math.max(0,...ids)+1;
-  const relIds=[...rels.matchAll(/Id="rId(\d+)"/g)].map(m=>Number(m[1]));const rid=`rId${Math.max(0,...relIds)+1}`;
-  const path=`xl/worksheets/sheet${id}_contaez.xml`;
-  workbook=workbook.replace('</sheets>',`<sheet name="${escapeXml(name)}" sheetId="${id}" r:id="${rid}"/></sheets>`);
-  rels=rels.replace('</Relationships>',`<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${id}_contaez.xml"/></Relationships>`);
-  types=types.replace('</Types>',`<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+  const ids=[...workbook.matchAll(/\bsheetId\s*=\s*["'](\d+)["']/g)].map(m=>Number(m[1]));
+  let id=Math.max(0,...ids)+1;
+  while(book.files[`xl/worksheets/sheet${id}.xml`])id++;
+  const relIds=new Set([...rels.matchAll(/\bId\s*=\s*["']([^"']+)["']/g)].map(m=>m[1]));
+  let relId=id;
+  while(relIds.has(`rId${relId}`))relId++;
+  const rid=`rId${relId}`;
+  const path=`xl/worksheets/sheet${id}.xml`;
+  const insert=(source:string,tag:string,child:(prefix:string)=>string)=>{
+    const closing=new RegExp(`</((?:[\\w.-]+:)?)(?:${tag})\\s*>`);
+    if(!closing.test(source))throw new Error('No se pueden añadir hojas a la estructura de este archivo.');
+    return source.replace(closing,(end:string,prefix:string)=>child(prefix)+end);
+  };
+  workbook=insert(workbook,'sheets',prefix=>`<${prefix}sheet name="${escapeXml(name)}" sheetId="${id}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="${rid}"/>`);
+  rels=insert(rels,'Relationships',prefix=>`<${prefix}Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${id}.xml"/>`);
+  types=insert(types,'Types',prefix=>`<${prefix}Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`);
   book.files['xl/workbook.xml']=strToU8(workbook);book.files['xl/_rels/workbook.xml.rels']=strToU8(rels);book.files['[Content_Types].xml']=strToU8(types);book.files[path]=strToU8(xml);
 }
 /** Only use with a result obtained from a separately verified calculation engine. */
