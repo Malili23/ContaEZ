@@ -11,7 +11,7 @@ export const releases = [
   },
   {
     version: '0.4.1',
-    notes: 'Correcciones de Excel, guardado y cálculos contables. Es la edición de la app web.',
+    notes: 'Correcciones de Excel, guardado y cálculos contables.',
     files: [
       { label: 'Windows', name: 'ContaEZ_0.4.1_x64-setup.exe', from: 'release' },
       { label: 'Mac (DMG)', name: 'ContaEZ-0.4.1-Mac-Apple-Silicon.dmg', from: 'release', source: 'Mac/ContaEZ-0.4.1-Mac-Apple-Silicon.dmg', optional: true },
