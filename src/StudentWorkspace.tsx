@@ -7,7 +7,7 @@ import { repairStudentPractice } from './studentProcessor';
 import type { ContextSuggestion, PracticeContextReview } from './io/context';
 import { backupProject, exportBytes, loadProjects, openExternal, isDesktop, saveProject } from './platform';
 import './student.css';
-import DownloadDesktopLink from './DownloadDesktopLink';
+import WebNavigation from './WebNavigation';
 import PracticeCompletionPanel from './PracticeCompletionPanel';
 import StudentChatGPT from './StudentChatGPT';
 
@@ -151,7 +151,7 @@ export default function StudentWorkspace({onAccounting}:{onAccounting:(mode:'bus
  const usefulQuestions=[...(practice?.questions||[])].sort((a,b)=>Number(isFocused(b))-Number(isFocused(a)));
  return <div className="student-app">
   <fieldset className="student-controls" disabled={!!busy||!loaded}>
-  <header className="student-header"><button className="student-logo" onClick={()=>selectPractice('')} aria-label="Inicio de ContaEZ"><span className="student-mark"><i/><i/><i/></span>Conta<span>EZ</span><small>MÉXICO</small></button><div className="student-header-actions"><DownloadDesktopLink/><button aria-expanded={showHow} aria-controls="student-help" onClick={()=>setShowHow(!showHow)}><CircleHelp size={17}/>Cómo funciona</button><div className="student-other"><button aria-expanded={showOther} aria-controls="student-other-modes" onClick={()=>setShowOther(!showOther)}>Otras modalidades<ChevronDown size={15}/></button>{showOther&&<div className="student-menu" id="student-other-modes">{(['business','individual'] as const).map(m=><button key={m} onClick={()=>onAccounting(m)}>{MODALITY_NAMES[m]}<ArrowRight size={15}/></button>)}</div>}</div></div></header>
+  <header className="student-header"><button className="student-logo" onClick={()=>selectPractice('')} aria-label="Inicio de ContaEZ"><span className="student-mark"><i/><i/><i/></span>Conta<span>EZ</span><small>MÉXICO</small></button><div className="student-header-actions"><WebNavigation/><button aria-expanded={showHow} aria-controls="student-help" onClick={()=>setShowHow(!showHow)}><CircleHelp size={17}/>Cómo funciona</button><div className="student-other"><button aria-expanded={showOther} aria-controls="student-other-modes" onClick={()=>setShowOther(!showOther)}>Otras modalidades<ChevronDown size={15}/></button>{showOther&&<div className="student-menu" id="student-other-modes">{(['business','individual'] as const).map(m=><button key={m} onClick={()=>onAccounting(m)}>{MODALITY_NAMES[m]}<ArrowRight size={15}/></button>)}</div>}</div></div></header>
   <main className="student-main">
    {showHow&&<section className="student-how" id="student-help"><button className="student-close" onClick={()=>setShowHow(false)} aria-label="Cerrar explicación"><X size={17}/></button><h2>Tu práctica a la izquierda. Su contexto, a la derecha.</h2><ol><li><strong>Elige el Excel que quieres corregir.</strong> Puedes enviar varios; cada uno conserva su propia revisión.</li><li><strong>Agrega lo que ayude.</strong> Adjunta un Excel correcto, fotos, CFDI, PDF o una nota como “el asiento en Diario!C1 no funciona”. Es opcional.</li><li><strong>Revisa y descarga.</strong> Se aplican las correcciones comprobables. Las propuestas tomadas de otro Excel muestran su origen y necesitan tu confirmación.</li></ol><p>Se conservan tus hojas y datos. No tienes que crear una empresa ni volver a capturar las operaciones.</p></section>}
    {!practice?<>
